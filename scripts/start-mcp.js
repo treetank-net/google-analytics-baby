@@ -8,7 +8,7 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const bundle = join(root, 'server', 'bundle.cjs');
 const pkgPath = join(root, 'package.json');
 
-const REPO_RAW = 'https://raw.githubusercontent.com/treetank-net/google-analytics-baby/master';
+const REPO_RAW = 'https://raw.githubusercontent.com/treetank-net/google-analytics-baby/main';
 
 function localVersion() {
   try {

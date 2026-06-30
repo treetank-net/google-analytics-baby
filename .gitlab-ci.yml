@@ -6,7 +6,7 @@ mirror-github:
   tags:
     - vps
   only:
-    - master
+    - main
   variables:
     GIT_STRATEGY: clone
     GIT_DEPTH: 0
@@ -16,6 +16,6 @@ mirror-github:
         echo "GITHUB_TREETANK_TOKEN must be configured in GitLab CI variables." >&2
         exit 1
       fi
-    - git checkout -B master "$CI_COMMIT_SHA"
-    - git push --force "https://${GITHUB_TREETANK_TOKEN}@github.com/treetank-net/google-analytics-baby.git" master
+    - git checkout -B main "$CI_COMMIT_SHA"
+    - git push --force "https://${GITHUB_TREETANK_TOKEN}@github.com/treetank-net/google-analytics-baby.git" main
     - git push --force --tags "https://${GITHUB_TREETANK_TOKEN}@github.com/treetank-net/google-analytics-baby.git"

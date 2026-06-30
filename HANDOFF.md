@@ -122,7 +122,7 @@ Zweryfikowane 2026-06-30 na `properties/261501807`:
 ### 5. Release (gdy działa)
 Bump wersji w `package.json` (root — źródło prawdy dla check_update), `server/package.json`,
 `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`. Wpis w `CHANGELOG.md` (`## vX.Y.Z`).
-Załóż repo: GitLab `treetank/google-analytics-baby` + GitHub mirror `treetank-net/google-analytics-baby`
-(manifesty i `REPO_RAW` już na to wskazują).
+Repo: GitLab `treetank/google-analytics-baby` + GitHub mirror `treetank-net/google-analytics-baby`.
+Domyślny czysty branch powinien być `main`; manifesty i `REPO_RAW` wskazują na `main`.
 
 Szczegóły architektury i decyzje: `CLAUDE.md`. Plan fazowy: `ROADMAP.md`.

@@ -112,8 +112,8 @@ source/medium (klucz join = źródło/medium kampanii).
 ## Repo & CI (do utworzenia)
 - GitLab: `treetank/google-analytics-baby` (origin, primary)
 - GitHub: `treetank-net/google-analytics-baby` (mirror)
-- `.gitlab-ci.yml`: mirror job pushuje `master` + tagi do GitHuba (runner tag `vps`, wymaga `GITHUB_TREETANK_TOKEN`)
-- URL raw w `start-mcp.js` i `check_update`: `https://raw.githubusercontent.com/treetank-net/google-analytics-baby/master`
+- `.gitlab-ci.yml`: mirror job pushuje `main` + tagi do GitHuba (runner tag `vps`, wymaga `GITHUB_TREETANK_TOKEN`)
+- URL raw w `start-mcp.js` i `check_update`: `https://raw.githubusercontent.com/treetank-net/google-analytics-baby/main`
 
 ## Roadmapa
 Patrz `ROADMAP.md`. Skrót: (1) OAuth + list_analytics_properties + run_report e2e,

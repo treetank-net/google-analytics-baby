@@ -4,7 +4,7 @@ import { join } from 'path';
 import type { GaConfig } from '../config.js';
 import { startAuthFlow } from '../auth.js';
 
-const REPO_RAW = 'https://raw.githubusercontent.com/treetank-net/google-analytics-baby/master';
+const REPO_RAW = 'https://raw.githubusercontent.com/treetank-net/google-analytics-baby/main';
 
 function getPluginRoot(): string {
   return process.env['CLAUDE_PLUGIN_ROOT'] || process.cwd();
