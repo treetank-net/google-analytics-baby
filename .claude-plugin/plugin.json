@@ -1,0 +1,25 @@
+{
+  "name": "google-analytics-baby",
+  "description": "Google Analytics 4 read-only MCP server. List properties, run reports, and get closed-loop channel performance (including Google Ads cost/ROAS straight from GA4). Read-only by design — no mutations, no confirmations. Feedback & bug reports: Jacek Mariański (jmarianski@trans.eu)",
+  "version": "0.1.0",
+  "author": {
+    "name": "Jacek Mariański",
+    "email": "jmarianski@trans.eu",
+    "url": "https://treetank.net"
+  },
+  "license": "MIT",
+  "keywords": ["google-analytics", "ga4", "mcp", "analytics", "read-only"],
+  "mcpServers": {
+    "google-analytics": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/start-mcp.js"],
+      "env": {
+        "CLAUDE_PLUGIN_DATA": "${CLAUDE_PLUGIN_DATA}",
+        "GA_BABY_DATA": "${GA_BABY_DATA:-}",
+        "GOOGLE_ANALYTICS_CLIENT_ID": "${GOOGLE_ANALYTICS_CLIENT_ID:-}",
+        "GOOGLE_ANALYTICS_CLIENT_SECRET": "${GOOGLE_ANALYTICS_CLIENT_SECRET:-}",
+        "GOOGLE_ANALYTICS_REFRESH_TOKEN": "${GOOGLE_ANALYTICS_REFRESH_TOKEN:-}"
+      }
+    }
+  }
+}

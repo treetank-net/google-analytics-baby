@@ -1,0 +1,17 @@
+{
+  "name": "google-analytics-baby-marketplace",
+  "metadata": {
+    "description": "Google Analytics 4 read-only analytics plugin by Treetank."
+  },
+  "owner": {
+    "name": "treetank"
+  },
+  "plugins": [
+    {
+      "description": "Google Analytics 4 read-only MCP server. List properties, run reports, closed-loop channel performance with Google Ads cost/ROAS straight from GA4.",
+      "name": "google-analytics-baby",
+      "source": "./",
+      "version": "0.1.0"
+    }
+  ]
+}

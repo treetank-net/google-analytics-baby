@@ -1,0 +1,13 @@
+{
+  "name": "google-analytics-baby",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Google Analytics 4 read-only MCP server.",
+  "author": "Jacek Marianski <jmarianski@trans.eu>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/treetank-net/google-analytics-baby"
+  },
+  "private": true
+}

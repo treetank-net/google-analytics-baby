@@ -1,0 +1,26 @@
+{
+  "name": "google-analytics-baby-server",
+  "version": "0.1.0",
+  "description": "Google Analytics 4 read-only MCP server",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc && npx esbuild dist/index.js --bundle --platform=node --target=node18 --format=cjs --minify --outfile=bundle.cjs",
+    "dev": "tsc --watch",
+    "start": "node bundle.cjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.13.0",
+    "@google-analytics/data": "^6.1.0",
+    "@google-analytics/admin": "^9.2.0",
+    "google-auth-library": "^10.9.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.24",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
