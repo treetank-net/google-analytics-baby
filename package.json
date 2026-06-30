@@ -1,6 +1,6 @@
 {
   "name": "google-analytics-baby",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Google Analytics 4 read-only MCP server.",
   "author": "Jacek Marianski <jmarianski@trans.eu>",

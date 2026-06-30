@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.1.1
+- Fix: bundle built without the built-in OAuth app credentials, so the auth flow demanded a custom Client ID/Secret. Restored the shared desktop-app credentials and rebuilt the bundle.
+
 ## v0.1.0
 Initial skeleton: read-only GA4 MCP server.
 - OAuth flow scoped to `analytics.readonly` (separate consent from google-ads-baby).
