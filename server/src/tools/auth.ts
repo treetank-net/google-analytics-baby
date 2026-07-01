@@ -91,7 +91,7 @@ export function registerAuthTools(server: McpServer, cfg: GaConfig) {
   );
 
   server.tool(
-    'check_update',
+    'update_plugin',
     'Check for plugin updates and install them. After updating, the user must restart the session for changes to take effect.',
     {},
     async () => {

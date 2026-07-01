@@ -7,7 +7,7 @@ import { registerReadTools } from './tools/read.js';
 async function main() {
   const server = new McpServer({
     name: 'google-analytics-baby',
-    version: '0.1.0',
+    version: '0.2.0',
   }, {
     instructions: [
       'This server is read-only: it reads Google Analytics 4 reports and configuration. There are no mutations, no confirmations, no safe words.',

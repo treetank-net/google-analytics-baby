@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.2.0
+- Rename the built-in updater tool from `check_update` to `update_plugin` and update docs/bundle references.
+- Align release metadata across package manifests, lockfile, and MCP server version.
+
 ## v0.1.1
 - Fix: bundle built without the built-in OAuth app credentials, so the auth flow demanded a custom Client ID/Secret. Restored the shared desktop-app credentials and rebuilt the bundle.
 

@@ -19,4 +19,4 @@
 - [ ] Jeśli pojawi się potrzeba mutacji na poziomie GA4 Admin (np. tworzenie konwersji, audiences), DOPIERO wtedy reużyć two-phase posture z rodziny `*-baby` (prepare/confirm + safe word + hook + audit log). Do tego czasu projekt zostaje read-only.
 
 ## Cross-projekt
-- [ ] Reguła trzech: jeśli przy trzecim projekcie wzorzec rusztowania (start-mcp, check_update, OAuth flow, config) się potwierdzi, rozważyć ekstrakcję `baby-core` — tylko mechanizmy bez wiedzy domenowej, nigdy modele danych.
+- [ ] Reguła trzech: jeśli przy trzecim projekcie wzorzec rusztowania (start-mcp, update_plugin, OAuth flow, config) się potwierdzi, rozważyć ekstrakcję `baby-core` — tylko mechanizmy bez wiedzy domenowej, nigdy modele danych.

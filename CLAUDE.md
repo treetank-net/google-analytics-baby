@@ -42,7 +42,7 @@ Reużywamy WZORZEC z `google-ads-baby` (`config.ts`: loadSavedConfig/saveConfig/
 `index.ts` owinięty w `async function main(){...} main()` — bez top-level await (wymóg CJS).
 
 ### Brak współdzielonego `baby-core`
-Świadomie KOPIUJEMY rusztowanie z `google-ads-baby` (start-mcp, check_update, OAuth flow, config).
+Świadomie KOPIUJEMY rusztowanie z `google-ads-baby` (start-mcp, update_plugin, OAuth flow, config).
 Reguła trzech: wspólny kod ekstrahujemy dopiero gdy wzorzec potwierdzi się przy TRZECIM projekcie i tylko
 mechanizmy bez wiedzy domenowej — nigdy modele danych GA4/Ads/Meta.
 
@@ -56,7 +56,7 @@ auth.ts             — lokalny serwer OAuth (port 9877), /open landing, /start-
 client.ts           — klienci GA4 (Data+Admin) + funkcje read
 
 tools/
-  auth.ts           — registerAuthTools(): setup_google_auth, check_update
+  auth.ts           — registerAuthTools(): setup_google_auth, update_plugin
   read.ts           — registerReadTools(): wszystkie toole read
 ```
 
@@ -113,7 +113,7 @@ source/medium (klucz join = źródło/medium kampanii).
 - GitLab: `treetank/google-analytics-baby` (origin, primary)
 - GitHub: `treetank-net/google-analytics-baby` (mirror)
 - `.gitlab-ci.yml`: mirror job pushuje `main` + tagi do GitHuba (runner tag `vps`, wymaga `GITHUB_TREETANK_TOKEN`)
-- URL raw w `start-mcp.js` i `check_update`: `https://raw.githubusercontent.com/treetank-net/google-analytics-baby/main`
+- URL raw w `start-mcp.js` i `update_plugin`: `https://raw.githubusercontent.com/treetank-net/google-analytics-baby/main`
 
 ## Roadmapa
 Patrz `ROADMAP.md`. Skrót: (1) OAuth + list_analytics_properties + run_report e2e,
