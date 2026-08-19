@@ -1,13 +1,14 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { configFromEnv } from './config.js';
+import { PLUGIN_VERSION } from './constants.js';
 import { registerAuthTools } from './tools/auth.js';
 import { registerReadTools } from './tools/read.js';
 
 async function main() {
   const server = new McpServer({
     name: 'google-analytics-baby',
-    version: '0.2.0',
+    version: PLUGIN_VERSION,
   }, {
     instructions: [
       'This server is read-only: it reads Google Analytics 4 reports and configuration. There are no mutations, no confirmations, no safe words.',

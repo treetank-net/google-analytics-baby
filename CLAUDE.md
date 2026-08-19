@@ -109,6 +109,14 @@ Dla Meta jest gorzej: GA4 zna tylko outcomes atrybuowane po source/medium (np. `
 bo Meta nie linkuje kosztu do GA4. Spend dla Meta trzeba dołożyć z `meta-ads-baby` i skorelować po
 source/medium (klucz join = źródło/medium kampanii).
 
+## Aktualizacje
+- JEDYNA ścieżka aktualizacji: tool `update_plugin`. `scripts/start-mcp.js` NIE aktualizuje na starcie —
+  pobiera bundle tylko wtedy, gdy go nie ma (stale cache CDN nadpisywał świeższą instalację starszymi plikami).
+- Bramka w `update_plugin` używa porównania semver, nie `!==` — kopia nowsza od serwera aktualizacji zostaje nietknięta.
+- Pobieranie jest atomowe (`<plik>.download` + `renameSync`).
+- `PLUGIN_VERSION` z `constants.ts` jest wkompilowany w bundle i odróżnia wersję POBRANĄ (package.json na dysku)
+  od AKTYWNEJ (kod w pamięci procesu) — proces nie umie podmienić swojego bundla w locie.
+
 ## Repo & CI (do utworzenia)
 - GitLab: `treetank/google-analytics-baby` (origin, primary)
 - GitHub: `treetank-net/google-analytics-baby` (mirror)

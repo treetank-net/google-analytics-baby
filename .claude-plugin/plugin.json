@@ -1,7 +1,7 @@
 {
   "name": "google-analytics-baby",
   "description": "Google Analytics 4 read-only MCP server. List properties, run reports, and get closed-loop channel performance (including Google Ads cost/ROAS straight from GA4). Read-only by design — no mutations, no confirmations. Feedback & bug reports: Jacek Mariański (jmarianski@trans.eu)",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "author": {
     "name": "Jacek Mariański",
     "email": "jmarianski@trans.eu",
