@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.3.0
 - Google Search Console support (read-only, scope `webmasters.readonly`), in the same plugin and OAuth flow as GA4:
   - `list_search_console_sites` — properties with permission level and kind (Domain vs URL prefix); optional matching to GA4 properties by web stream domain.
   - `run_search_analytics` — clicks, impressions, CTR and position by query/page/country/device/date/searchAppearance/hour, with AND filters (regex for alternatives), search type, data state, aggregation type and API paging.
