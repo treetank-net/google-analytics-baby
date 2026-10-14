@@ -11,7 +11,7 @@
       "description": "Google Analytics 4 + Google Search Console read-only MCP server. List properties, run reports, closed-loop channel performance with Google Ads cost/ROAS straight from GA4, organic search queries/pages, URL indexing and sitemaps.",
       "name": "google-analytics-baby",
       "source": "./",
-      "version": "0.3.0"
+      "version": "0.4.0"
     }
   ]
 }

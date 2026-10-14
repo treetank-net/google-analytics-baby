@@ -1,7 +1,7 @@
 {
   "name": "google-analytics-baby",
   "description": "Google Analytics 4 + Google Search Console read-only MCP server. List properties, run GA4 reports, get closed-loop channel performance (including Google Ads cost/ROAS straight from GA4), and read Search Console queries, pages, URL indexing and sitemaps. Read-only by design — no mutations, no confirmations. Feedback & bug reports: Jacek Mariański (jmarianski@trans.eu)",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "author": {
     "name": "Jacek Mariański",
     "email": "jmarianski@trans.eu",

@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.0
+
+- **Token diet** (see marketing-context-mcp `docs/response-format-contract.md`): one-line tool descriptions, compact `tools/list`, new `google-analytics-manual` skill.
+- GA4 and Search Console responses are TSV with short column names, `*_pct` ratios, header line for constant columns and totals. `run_report` on 500 rows: ~171k → ~5k chars.
+- `order_by` and `limit` are sent to the GA4 API (default 100 rows); no request goes out without a limit. Totals use GA's own TOTAL aggregation, additive metrics only.
+- Shaping parameters `fields`, `order_by`, `limit`, `summary`, `min_cost`/`min_clicks`/`min_impressions` (Google Ads metrics), `page`/`page_chars`.
+- `get_channel_performance` asks for `keyEvents` instead of the renamed `conversions`.
+
 ## v0.3.0
 - Google Search Console support (read-only, scope `webmasters.readonly`), in the same plugin and OAuth flow as GA4:
   - `list_search_console_sites` — properties with permission level and kind (Domain vs URL prefix); optional matching to GA4 properties by web stream domain.
