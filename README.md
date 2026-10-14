@@ -40,7 +40,10 @@ Responses are compact tab-separated tables shaped on the server: short snake_cas
 `*_pct`, money with 2 decimals in the property currency, constant columns and totals over all matching
 rows in `#` header lines. Every table tool takes `fields`, `order_by` (`-sessions` = descending),
 `limit`, `summary`, `page` and `page_chars`; `min_cost` / `min_clicks` / `min_impressions` where the
-column exists. GA4 reports push the order and limit down to the API.
+column exists. GA4 reports push the order and limit down to the API. `run_report`,
+`get_channel_performance` and `run_search_analytics` also take `output: "file"`: every row goes to a
+plain TSV file under `~/.google-analytics-baby/exports/` (up to 100 000 rows fetched) and the response
+is the path, totals and 5 rows.
 
 Tool descriptions are one line each to keep the tool manifest small. The `google-analytics-manual`
 skill documents every tool in detail; the `gsc` skill covers Search Console pitfalls (data lag,

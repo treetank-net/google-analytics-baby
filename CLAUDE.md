@@ -93,7 +93,12 @@ snake_case nazw API GA4 (`reportColumnName` w `ga-format.ts`) z aliasami rodziny
 Wartości: metryki GA4 przychodzą jako stringi → liczby; ułamki (`*Rate`, `dauPerMau` itp.) → `*_pct`;
 `TYPE_CURRENCY` → 2 miejsca; reszta 2 miejsca gdy ≥ 1, inaczej 3 cyfry znaczące; `date` → ISO.
 Wspólne parametry o nazwach z kontraktu: `fields`, `order_by` (`-` = malejąco), `limit`, `summary`,
-`min_cost`/`min_clicks`/`min_impressions` (tylko gdzie kolumna istnieje), `page`, `page_chars` (domyślnie 12k).
+`min_cost`/`min_clicks`/`min_impressions` (tylko gdzie kolumna istnieje), `page`, `page_chars` (domyślnie 12k),
+`output: "file"` (`run_report`, `get_channel_performance`, `run_search_analytics`; nie realtime ani toole
+listujące — waga schematu): wszystkie wiersze po shapingu do czystego TSV `<configDir>/exports/<title>-<ts>.tsv`
+(nagłówek kolumn, bez `#`, bez hoistingu), odpowiedź = nagłówek z `rows=N · file=`, `# columns:`, totals,
+notki, 5 wierszy. Bez jawnego `limit` GA4 wysyła `limit` 100 000, GSC stronicuje `startRow` po 25 000 do
+100 000 (`fetchSearchAnalyticsRows`); trafienie w cap → `capped at N`.
 
 GA4 (`planReport`): `order_by` i `limit` idą do API (`orderBys`, `limit`, domyślnie 100, channel 50) — nigdy
 więcej nie wysyłamy requestu bez limitu (domyślne 10 000 wierszy API). `rowCount` daje „of M”. Totals:

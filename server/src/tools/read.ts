@@ -53,8 +53,8 @@ function bareProperty(property: string): string {
 }
 
 function shapeOf(input: Shape): Shape {
-  const { fields, order_by, limit, min_cost, min_impressions, min_clicks, summary, page, page_chars } = input;
-  return { fields, order_by, limit, min_cost, min_impressions, min_clicks, summary, page, page_chars };
+  const { fields, order_by, limit, min_cost, min_impressions, min_clicks, summary, page, page_chars, output } = input;
+  return { fields, order_by, limit, min_cost, min_impressions, min_clicks, summary, page, page_chars, output };
 }
 
 async function handleRead(cfg: GaConfig, fn: () => Promise<string>) {
@@ -145,7 +145,7 @@ export function registerReadTools(server: McpServer, cfg: GaConfig) {
       property_id: z.string(),
       dimensions: z.array(z.string()).default([]).describe('e.g. ["unifiedScreenName"]'),
       metrics: z.array(z.string()).min(1).describe('e.g. ["activeUsers"]'),
-      ...shapeSchemas(),
+      ...shapeSchemas({ output: false }),
     },
     async (input) => handleRead(cfg, async () => {
       const columns = reportColumns(input.dimensions, input.metrics);

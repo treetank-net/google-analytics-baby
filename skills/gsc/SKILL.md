@@ -47,6 +47,11 @@ conclusions come from treating Search Console numbers like GA4 numbers — they 
   `order_by` and `min_impressions` / `min_clicks` only cut what is shown. When the header says
   row_limit was reached, call again with the suggested `start_row`. Long-tail rows with 0 clicks may
   sit beyond what the API ever returns.
+- **Large exports: `output: "file"`.** For thousands of queries or pages, or a long daily series,
+  pass `output: "file"` without `limit`: the server pages with `start_row` (25 000 per call, up to
+  100 000 rows, `capped at N` when hit) and writes every row to a plain TSV file; the response is the
+  path, totals and 5 rows. Aggregate the file with duckdb/awk/mlr and print only the result; never
+  `cat` it. Format and parsing examples: google-analytics-manual skill, "File output".
 
 ## Filters
 
@@ -76,12 +81,14 @@ Key on the landing page.
   session and the time zone difference all move the numbers. Compare trends and ratios, not absolutes.
 - Typical joined view per landing page: impressions, clicks, CTR, position (GSC) + sessions,
   engagement rate, conversions, revenue (GA4).
+- For more than a few hundred pages, export both sides with `output: "file"` (GSC `["page"]`, GA4
+  `["landingPage"]`) and join the two TSV files in duckdb (manual skill, "File output").
 
 ## Recipes
 
 **Keyword cannibalization** — several URLs competing for one query.
-`dimensions: ["query", "page"]`, `row_limit: 25000`, `min_impressions: 50`, `order_by: "query"`,
-a large `limit`, last 28-90 days. Group rows by query; flag
+`dimensions: ["query", "page"]`, `min_impressions: 50`, `output: "file"` (or inline with
+`row_limit: 25000` and a large `limit`), last 28-90 days. Group rows by query; flag
 queries where 2+ pages each get a meaningful share of impressions (e.g. ≥ 20%) and positions are
 close. Check with `inspect_url` which page Google treats as canonical.
 

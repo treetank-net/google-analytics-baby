@@ -16,6 +16,8 @@ import {
 
 export const REPORT_DEFAULT_LIMIT = 100;
 export const REPORT_FETCH_CAP = 10_000;
+/** output: "file" without an explicit limit fetches this many rows (GA4 runReport allows up to 250000). */
+export const REPORT_FILE_FETCH_CAP = 100_000;
 
 const COLUMN_ALIASES: Record<string, string> = {
   sessionSourceMedium: 'source_medium',
@@ -93,7 +95,9 @@ export function planReport(columns: ReportColumn[], shape: Shape, defaultLimit =
   const available = columns.map((c) => c.column);
   const resolved = validateShape(shape, available, columnAliases(columns));
   const order = resolved.order_by ?? defaultOrder;
-  const limit = Math.min(resolved.limit ?? defaultLimit, REPORT_FETCH_CAP);
+  const file = resolved.output === 'file';
+  const cap = file ? REPORT_FILE_FETCH_CAP : REPORT_FETCH_CAP;
+  const limit = Math.min(resolved.limit ?? (file ? cap : defaultLimit), cap);
   const hasThresholds = THRESHOLDS.some(([param]) => resolved[param] !== undefined);
   const byColumn = new Map(columns.map((c) => [c.column, c]));
 
@@ -118,7 +122,7 @@ export function planReport(columns: ReportColumn[], shape: Shape, defaultLimit =
     }));
   const metricFilter = expressions.length ? (expressions.length === 1 ? expressions[0] : { andGroup: { expressions } }) : undefined;
 
-  const fetchLimit = hasThresholds ? REPORT_FETCH_CAP : resolved.summary ? 1 : limit;
+  const fetchLimit = hasThresholds ? cap : resolved.summary ? 1 : limit;
   return {
     shape: resolved,
     order,
@@ -219,6 +223,9 @@ export function shapeReportResponse(columns: ReportColumn[], plan: ReportPlan, r
   } else {
     const apiTotals = response.totals?.[0] ? metricRow(columns, response, response.totals[0]) : {};
     totals = Object.fromEntries(Object.entries(apiTotals).filter(([column, value]) => SUMMABLE_COLUMNS.has(column) && value !== undefined));
+    if (plan.shape.output === 'file' && plan.shape.limit === undefined && rowCount > rows.length) {
+      notes.push(`capped at ${rows.length} of ${rowCount} rows; narrow the dates or dimension_filter`);
+    }
   }
   return {
     rows,

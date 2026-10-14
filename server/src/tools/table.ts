@@ -1,4 +1,7 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { z } from 'zod';
+import { getConfigDir } from '../config.js';
 
 export type Cell = string | number | boolean | null | undefined;
 export type Row = Record<string, Cell>;
@@ -45,7 +48,9 @@ export function timestampDate(value: unknown): string | undefined {
   return Number.isFinite(n) && n > 0 ? new Date(n * 1000).toISOString().slice(0, 10) : undefined;
 }
 
-export function shapeSchemas() {
+export const outputSchema = z.enum(['inline', 'file']).optional().describe('file: every row to a TSV file; returns path, totals, 5 rows');
+
+export function shapeSchemas(options: { output?: boolean } = {}) {
   return {
     fields: z.array(z.string()).optional(),
     order_by: z.string().optional(),
@@ -53,6 +58,7 @@ export function shapeSchemas() {
     summary: z.boolean().optional(),
     page: pagingSchemas.page,
     page_chars: pagingSchemas.page_chars,
+    ...(options.output === false ? {} : { output: outputSchema }),
   };
 }
 
@@ -77,6 +83,7 @@ export interface Shape {
   summary?: boolean;
   page?: number;
   page_chars?: number;
+  output?: 'inline' | 'file';
 }
 
 export const THRESHOLDS: Array<[keyof Shape, string]> = [
@@ -272,13 +279,14 @@ export function tableDocument(spec: TableSpec): string {
     : [`rows=${shown}`, ...(shaped.order && shown > 1 ? [`by ${shaped.order}`] : [])];
   const head = [spec.title, ...(spec.scope ?? []), ...(spec.currency ? [`currency=${spec.currency}`] : []), ...shaped.thresholds, ...count];
   const lines = [`# ${head.join(' · ')}`];
-  if (Object.keys(layout.constants).length) lines.push(`# ${formatPairs(layout.constants)}`);
+  if (shape.output !== 'file' && Object.keys(layout.constants).length) lines.push(`# ${formatPairs(layout.constants)}`);
   if (Object.keys(totals).length && (matched > 1 || shape.summary)) {
     const label = spec.totalsLabel ?? (matched !== shown ? `all ${matched}` : '');
     lines.push(`# totals${label ? ` (${label})` : ''}: ${formatPairs(totals)}`);
   }
   for (const note of spec.notes ?? []) lines.push(`# ${note}`);
   if (shape.summary) return lines.join('\n');
+  if (shape.output === 'file') return fileDocument(spec.title, shaped, lines);
 
   const paged = pageRows(shaped.rows, layout.columns, shape.page ?? 1, shape.page_chars ?? DEFAULT_TABLE_PAGE_CHARS);
   const body = renderRows(paged.rows, layout.columns);
@@ -287,6 +295,31 @@ export function tableDocument(spec: TableSpec): string {
     const to = paged.from + paged.rows.length - 1;
     lines.push(`# page ${paged.page}/${paged.pages}, rows ${paged.from}-${to} of ${shown}${paged.page < paged.pages ? `; page: ${paged.page + 1} for more` : ''}`);
   }
+  return lines.join('\n');
+}
+
+export const FILE_PREVIEW_ROWS = 5;
+
+export function exportPath(title: string, now = new Date()): string {
+  const name = title.replace(/[^a-z0-9_-]+/gi, '_').replace(/^_+|_+$/g, '') || 'table';
+  return join(getConfigDir(), 'exports', `${name}-${now.toISOString().replace(/[:.]/g, '-')}.tsv`);
+}
+
+/**
+ * output: "file" — every shaped row (filters, order, limit and fields still apply,
+ * paging does not) goes to a plain TSV file: one header line of column names,
+ * then rows; no `#` lines, no hoisted columns, so any TSV reader parses it as is.
+ */
+function fileDocument(title: string, shaped: Shaped, head: string[]): string {
+  const columns = shaped.columns.filter((column) => shaped.rows.some((row) => row[column] !== undefined && row[column] !== null && row[column] !== ''));
+  const path = exportPath(title);
+  mkdirSync(join(getConfigDir(), 'exports'), { recursive: true });
+  writeFileSync(path, columns.length ? `${renderRows(shaped.rows, columns) || columns.join('\t')}\n` : '', 'utf8');
+  const lines = [...head];
+  lines[0] = `${lines[0].replace(/ · rows=\d+/, '')} · rows=${shaped.rows.length} · file=${path}`;
+  lines.splice(1, 0, `# columns: ${columns.join(' ')}`);
+  const preview = renderRows(shaped.rows.slice(0, FILE_PREVIEW_ROWS), columns);
+  if (preview) lines.push(preview);
   return lines.join('\n');
 }
 

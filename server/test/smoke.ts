@@ -1,5 +1,9 @@
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   GoogleApiError,
+  GSC_FILE_ROW_CAP,
   buildSearchAnalyticsBody,
   classifyGoogleApiError,
   normalizeSiteUrl,
@@ -25,6 +29,7 @@ import {
 import {
   customDimensionRows,
   customMetricRows,
+  REPORT_FILE_FETCH_CAP,
   planReport,
   propertyDetailsDocument,
   propertyRows,
@@ -42,7 +47,7 @@ import {
   siteRows,
   sitemapRows,
 } from '../src/tools/search-console-format.js';
-import { resolveSearchAnalyticsDates } from '../src/tools/search-console.js';
+import { fetchSearchAnalyticsRows, resolveSearchAnalyticsDates, searchAnalyticsFetchPlan } from '../src/tools/search-console.js';
 import { GA_SCOPES, GSC_SCOPE } from '../src/constants.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerAuthTools } from '../src/tools/auth.js';
@@ -279,6 +284,18 @@ function gaReportResponse(): any {
 const REPORT_DIMENSIONS = ['sessionSourceMedium', 'date'];
 const REPORT_METRICS = ['sessions', 'totalUsers', 'engagementRate', 'purchaseRevenue', 'averageSessionDuration', 'advertiserAdCost', 'advertiserAdClicks'];
 
+function withExportDir(fn: () => void) {
+  const previous = process.env.GA_BABY_DATA;
+  const dir = mkdtempSync(join(tmpdir(), 'gab-export-'));
+  process.env.GA_BABY_DATA = dir;
+  try {
+    fn();
+  } finally {
+    if (previous === undefined) delete process.env.GA_BABY_DATA; else process.env.GA_BABY_DATA = previous;
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 function testTable() {
   console.log('\n--- Table shaping ---');
   assert('snakeCase', snakeCase('sessionSourceMedium') === 'session_source_medium' && snakeCase('customEvent:plan_type') === 'custom_event_plan_type');
@@ -314,6 +331,24 @@ function testTable() {
   const small = tableDocument({ title: 'q', rows: many, shape: { page: 2, page_chars: 2000 } });
   assert('page_chars and page select a slice', small.includes('# page 2/') && small.length < 2600, String(small.length));
 
+  withExportDir(() => {
+    const rows3000: Row[] = Array.from({ length: 3000 }, (_, i) => ({ page: `https://example.com/p/${i}`, query: `query ${i}`, country: 'pol', clicks: i % 7, impressions: 100 + i, empty: '' }));
+    const exported = tableDocument({ title: 'search analytics', scope: ['sc-domain:example.com'], rows: rows3000, defaultOrder: '-clicks', notes: ['incomplete from 2026-10-12'], shape: { output: 'file', min_clicks: 1 } });
+    const matching = rows3000.filter((row) => (row.clicks as number) >= 1).length;
+    const fileMatch = exported.match(/ · file=(\S+\.tsv)$/m);
+    assert('file mode names the written file in the header', Boolean(fileMatch) && exported.split('\n')[0].includes(`rows=${matching} · file=`), exported.split('\n')[0]);
+    assert('file mode lists the columns, constant country kept, empty dropped', exported.split('\n')[1] === '# columns: page query country clicks impressions', exported.split('\n')[1]);
+    assert('file mode returns a short response with 5 preview rows', exported.length < 1500 && exported.split('\n').filter((line) => !line.startsWith('#')).length === 6, `chars=${exported.length}`);
+    assert('file mode keeps notes and totals', exported.includes('# incomplete from 2026-10-12') && /# totals: clicks=\d+/.test(exported));
+    const file = readFileSync(fileMatch![1], 'utf8').trimEnd().split('\n');
+    assert('the file holds every matching row, unpaged, with one header line', file.length === matching + 1 && file[0] === 'page\tquery\tcountry\tclicks\timpressions', `lines=${file.length}`);
+    assert('the file has no comment lines', file.every((line) => !line.startsWith('#')));
+    assert('the file is named <title>-<timestamp>.tsv under exports/', /\/exports\/search_analytics-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.tsv$/.test(fileMatch![1]), fileMatch![1]);
+    const limited = tableDocument({ title: 'q', rows: rows3000, shape: { output: 'file', limit: 10, fields: ['query', 'clicks'] } });
+    const limitedFile = readFileSync(limited.match(/file=(\S+)/)![1], 'utf8').trimEnd().split('\n');
+    assert('file mode honours limit and fields', limitedFile.length === 11 && limitedFile[0] === 'query\tclicks' && limited.split('\n')[0].endsWith(limited.match(/file=\S+/)![0]) && !/rows=\d+.*rows=/.test(limited.split('\n')[0]), limited.split('\n')[0]);
+  });
+
   const sections = sectionsDocument(['head'], [['empty', []], ['full', [{ a: 1 }]]]);
   assert('sections render header, empty and filled sections', sections === '# head\n## empty (0)\n## full (1)\na\n1', sections);
 }
@@ -343,6 +378,13 @@ function testReportPlan() {
   assert('min_cost without a cost metric is rejected', (() => {
     try { planReport(reportColumns(['date'], ['sessions']), { min_cost: 1 }); return false; } catch (err) { return err instanceof ShapeError; }
   })());
+
+  const filePlan = planReport(columns, { output: 'file' });
+  assert('file mode without limit asks GA4 for 100000 rows', filePlan.fetchLimit === REPORT_FILE_FETCH_CAP && filePlan.limit === 100_000);
+  assert('file mode honours an explicit limit', planReport(columns, { output: 'file', limit: 500 }).fetchLimit === 500);
+  assert('file mode raises the threshold fetch cap', planReport(columns, { output: 'file', min_cost: 1 }).fetchLimit === REPORT_FILE_FETCH_CAP);
+  const fileRequest = buildReportRequest('123', { dimensions: ['date'], metrics: ['sessions'], startDate: '7daysAgo', endDate: 'today', limit: filePlan.fetchLimit }) as any;
+  assert('file mode request carries limit 100000', fileRequest.limit === '100000');
 
   const request = buildReportRequest('123', { dimensions: ['date'], metrics: ['sessions'], startDate: '7daysAgo', endDate: 'today', limit: 100, orderBys: plan.orderBys, metricAggregations: ['TOTAL'], dimensionFilter: 'sessionSourceMedium == "google / cpc"' }) as any;
   assert('request carries explicit limit, orderBys and aggregations', request.limit === '100' && request.property === 'properties/123' && request.orderBys.length === 1 && request.metricAggregations[0] === 'TOTAL');
@@ -375,6 +417,13 @@ function testReportDocument() {
   response.rowCount = 20_000;
   const capped = reportDocument({ title: 'GA4 report', scope: [], columns, plan: thresholdPlan, response });
   assert('fetch cap is declared', capped.includes('capped at 3 of 20000') && capped.includes('totals (first 3 fetched)'), capped.split('\n').slice(0, 4).join(' | '));
+
+  withExportDir(() => {
+    const big = gaReportResponse();
+    big.rowCount = 300_000;
+    const fileDoc = reportDocument({ title: 'GA4 report', scope: ['property 123'], columns, plan: planReport(columns, { output: 'file' }), response: big });
+    assert('file mode declares the GA4 cap', fileDoc.includes('# capped at 3 of 300000 rows') && /rows=3 · file=\S+GA4_report-/.test(fileDoc), fileDoc.split('\n').slice(0, 4).join(' | '));
+  });
 
   const flagged = gaReportResponse();
   flagged.metadata.subjectToThresholding = true;
@@ -487,6 +536,30 @@ function paramDescriptions(schema: unknown, path: string, out: Array<[string, st
   }
 }
 
+async function testSearchAnalyticsFileFetch() {
+  console.log('\n--- Search Console file-mode fetch ---');
+  assert('inline plan is one request of max(row_limit, limit)', searchAnalyticsFetchPlan({ row_limit: 1000, limit: 3000 }).total === 3000 && searchAnalyticsFetchPlan({ row_limit: 1000 }).total === 1000);
+  assert('file plan without limit fetches the file cap', searchAnalyticsFetchPlan({ row_limit: 1000, output: 'file' }).total === GSC_FILE_ROW_CAP && GSC_FILE_ROW_CAP === 100_000);
+  assert('file plan honours an explicit limit', searchAnalyticsFetchPlan({ row_limit: 1000, limit: 40_000, output: 'file' }).total === 40_000);
+
+  const available = 60_000;
+  const calls: Array<{ startRow?: number; rowLimit?: number }> = [];
+  const fake = async (page: SearchAnalyticsRequest) => {
+    calls.push({ startRow: page.startRow, rowLimit: page.rowLimit });
+    const start = page.startRow ?? 0;
+    const count = Math.max(0, Math.min(page.rowLimit ?? 0, available - start));
+    return { rows: Array.from({ length: count }, (_, i) => ({ keys: [`q${start + i}`], clicks: 1, impressions: 2, ctr: 0.5, position: 1 })), metadata: { first_incomplete_date: '2026-10-12' } };
+  };
+  const all = await fetchSearchAnalyticsRows(baseRequest({ startRow: 0 }), GSC_FILE_ROW_CAP, fake);
+  assert('file mode pages with startRow, 25000 per request, until a short page', all.rows!.length === 60_000 && JSON.stringify(calls) === '[{"startRow":0,"rowLimit":25000},{"startRow":25000,"rowLimit":25000},{"startRow":50000,"rowLimit":25000}]', JSON.stringify(calls));
+  assert('paged response keeps the first page metadata', all.metadata?.first_incomplete_date === '2026-10-12');
+  calls.length = 0;
+  const capped = await fetchSearchAnalyticsRows(baseRequest({ startRow: 0 }), 30_000, fake);
+  assert('paging stops at the total', capped.rows!.length === 30_000 && calls[1].rowLimit === 5_000);
+  const view = searchAnalyticsView('sc-domain:example.com', { ...baseRequest(), rowLimit: 30_000, startRow: 0 }, capped, true);
+  assert('file cap declared in the GSC notes', view.notes.includes('capped at 30000 rows; more may exist (start_row: 30000)'), view.notes.join(' | '));
+}
+
 async function testToolListingBudget() {
   console.log('\n--- Tool listing budget ---');
   const compacted = compactSchema({ type: 'object', $schema: 'x', additionalProperties: false, properties: { pattern: { type: 'string', minLength: 1, maxLength: 30 } } }) as any;
@@ -520,6 +593,7 @@ async function main() {
   testReportDocument();
   testGaConfigFormatting();
   testSearchConsoleFormat();
+  await testSearchAnalyticsFileFetch();
   await testToolListingBudget();
 
   console.log(`\n--- Results: ${passed} passed, ${failed} failed ---`);

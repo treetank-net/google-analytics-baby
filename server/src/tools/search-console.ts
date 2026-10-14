@@ -8,6 +8,7 @@ import {
   GSC_DATA_STATES,
   GSC_DEFAULT_ROW_LIMIT,
   GSC_DIMENSIONS,
+  GSC_FILE_ROW_CAP,
   GSC_FILTER_DIMENSIONS,
   GSC_FILTER_OPERATORS,
   GSC_MAX_ROW_LIMIT,
@@ -20,6 +21,7 @@ import {
   resolveGscDate,
   searchAnalyticsProblems,
   todayInSearchConsoleTimeZone,
+  type GscSearchAnalyticsResponse,
   type SearchAnalyticsRequest,
 } from '../search-console.js';
 import { pagingSchemas, sectionsDocument, shapeSchemas, tableDocument, tableError, thresholdSchemas } from './table.js';
@@ -72,6 +74,39 @@ export function resolveSearchAnalyticsDates(
     startDate: resolveGscDate(input.start_date || '28daysAgo', today),
     endDate: resolveGscDate(input.end_date || 'today', today),
   };
+}
+
+/**
+ * Rows to fetch for run_search_analytics. Inline: one request of max(row_limit, limit).
+ * output "file": an explicit limit is honoured, otherwise GSC_FILE_ROW_CAP, paged by startRow.
+ */
+export function searchAnalyticsFetchPlan(input: { row_limit: number; limit?: number; output?: 'inline' | 'file' }): { total: number; fileCap: boolean } {
+  if (input.output === 'file') {
+    if (input.limit === undefined) return { total: GSC_FILE_ROW_CAP, fileCap: true };
+    return { total: Math.min(GSC_FILE_ROW_CAP, Math.max(input.row_limit, input.limit)), fileCap: false };
+  }
+  return { total: Math.min(GSC_MAX_ROW_LIMIT, Math.max(input.row_limit, input.limit ?? 0)), fileCap: false };
+}
+
+/** Fetches up to `total` rows from request.startRow on, GSC_MAX_ROW_LIMIT per request; stops at a short page. */
+export async function fetchSearchAnalyticsRows(
+  request: SearchAnalyticsRequest,
+  total: number,
+  fetchPage: (page: SearchAnalyticsRequest) => Promise<GscSearchAnalyticsResponse>,
+): Promise<GscSearchAnalyticsResponse> {
+  const rows: NonNullable<GscSearchAnalyticsResponse['rows']> = [];
+  let first: GscSearchAnalyticsResponse | undefined;
+  let startRow = request.startRow ?? 0;
+  while (rows.length < total) {
+    const rowLimit = Math.min(GSC_MAX_ROW_LIMIT, total - rows.length);
+    const page = await fetchPage({ ...request, startRow, rowLimit });
+    first ??= page;
+    const got = page.rows ?? [];
+    rows.push(...got);
+    startRow += got.length;
+    if (got.length < rowLimit) break;
+  }
+  return { ...first, rows };
 }
 
 async function safeListWebStreams(cfg: GaConfig): Promise<{ streams?: WebStreamSummary[]; note?: string }> {
@@ -131,6 +166,7 @@ export function registerSearchConsoleTools(server: McpServer, cfg: GaConfig) {
     async (input) => handleSearchConsole(cfg, async () => {
       const siteUrl = normalizeSiteUrl(input.site_url);
       const { startDate, endDate } = resolveSearchAnalyticsDates(input);
+      const plan = searchAnalyticsFetchPlan(input);
       const request: SearchAnalyticsRequest = {
         startDate,
         endDate,
@@ -139,19 +175,19 @@ export function registerSearchConsoleTools(server: McpServer, cfg: GaConfig) {
         type: input.type,
         dataState: input.data_state,
         aggregationType: input.aggregation_type,
-        rowLimit: Math.min(GSC_MAX_ROW_LIMIT, Math.max(input.row_limit, input.limit ?? 0)),
+        rowLimit: plan.total,
         startRow: input.start_row,
       };
       const problems = searchAnalyticsProblems(request);
       if (problems.length) throw new Error(`invalid Search Analytics request:\n${problems.map((problem) => `  - ${problem}`).join('\n')}`);
-      const response = await querySearchAnalytics(cfg, siteUrl, request);
-      const view = searchAnalyticsView(siteUrl, request, response);
-      const { fields, order_by, limit, summary, page, page_chars, min_impressions, min_clicks } = input;
+      const response = await fetchSearchAnalyticsRows(request, plan.total, (page) => querySearchAnalytics(cfg, siteUrl, page));
+      const view = searchAnalyticsView(siteUrl, request, response, plan.fileCap);
+      const { fields, order_by, limit, summary, page, page_chars, min_impressions, min_clicks, output } = input;
       return tableDocument({
         title: 'search analytics',
         scope: view.scope,
         rows: searchAnalyticsRows(request.dimensions, response),
-        shape: { fields, order_by, limit: limit ?? SEARCH_ANALYTICS_DEFAULT_LIMIT, summary, page, page_chars, min_impressions, min_clicks },
+        shape: { fields, order_by, limit: limit ?? (output === 'file' ? undefined : SEARCH_ANALYTICS_DEFAULT_LIMIT), summary, page, page_chars, min_impressions, min_clicks, output },
         defaultOrder: searchAnalyticsDefaultOrder(request.dimensions),
         totalsLabel: view.totalsLabel,
         notes: view.notes,

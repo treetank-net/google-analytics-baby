@@ -14,6 +14,8 @@ export const GSC_DATA_STATES = ['final', 'all', 'hourly_all'] as const;
 export const GSC_AGGREGATION_TYPES = ['auto', 'byPage', 'byProperty', 'byNewsShowcasePanel'] as const;
 export const GSC_MAX_ROW_LIMIT = 25_000;
 export const GSC_DEFAULT_ROW_LIMIT = 1_000;
+/** output: "file" without an explicit limit pages with startRow up to this many rows. */
+export const GSC_FILE_ROW_CAP = 100_000;
 export const GSC_TIME_ZONE = 'America/Los_Angeles';
 
 export type GscDimension = typeof GSC_DIMENSIONS[number];

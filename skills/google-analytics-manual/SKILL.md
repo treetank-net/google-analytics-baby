@@ -62,6 +62,49 @@ source_medium	sessions	total_users	engagement_rate_pct	purchase_revenue	cost
 | `summary` | Header and totals only, no rows (GA4 fetches a single row) |
 | `min_cost`, `min_clicks`, `min_impressions` | Drop rows below the threshold. GA4: they need the advertiser metric (`advertiserAdCost`, `advertiserAdClicks`, `advertiserAdImpressions`), are sent as a metric filter, and up to 10 000 rows are fetched so totals can be summed over the filtered rows (`capped at` if more match). Search Console: `min_impressions`, `min_clicks` |
 | `page`, `page_chars` | Pages of the shaped table, by size (default 12 000 chars, 2 000-100 000) |
+| `output: "file"` | Every row to a TSV file; the response is the path, totals and 5 rows. `run_report`, `get_channel_performance`, `run_search_analytics`; see File output |
+
+### File output (large tables)
+
+`output: "file"` writes **every** row that passes `min_*`, `order_by`, `limit` and `fields` to a
+TSV file and returns only the header (with `rows=N · file=<path>`), `# columns: ...`, totals, notes
+and the first 5 rows. Paging does not apply. Use it when a table would take more than one page:
+thousands of Search Console queries or pages, a long daily series (`date` x `sessionSourceMedium`
+over a year), or when you will join, group or rank the data yourself, e.g. GA4 landing pages
+against GSC pages. In hosts without a shell (Claude Desktop) stay inline.
+
+Without an explicit `limit`, file mode fetches far more: GA4 asks the API for 100 000 rows (instead
+of 100; `min_*` too), Search Console pages with `start_row` 25 000 rows per call up to 100 000 (instead
+of one `row_limit` call). When that cap is hit the header says `capped at N`; narrow the dates or
+filters. An explicit `limit` is still honoured.
+
+The file format is fixed so it parses without guessing:
+- UTF-8, path `~/.google-analytics-baby/exports/<title>-<timestamp>.tsv` (or under `GA_BABY_DATA`);
+  take it from `file=` in the response.
+- Line 1 is the column names (the same short names as inline: `source_medium`, `landing_page`,
+  `sessions`, `query`, `page`, `clicks`, `ctr_pct`, ...), then one row per line.
+- Tab-delimited, no quoting, no `#` lines. Tabs and newlines inside values are replaced by spaces.
+- Empty cell means no value. Numbers use `.` and no thousands separator. Money is in the property
+  currency (from `currency=` in the response); `*_pct` are percents; dates are ISO.
+- Constant columns stay in the file (they are not hoisted); all-empty columns are dropped.
+
+Parse it with standard tools and print only aggregates:
+```bash
+F=/path/from/response.tsv
+head -3 "$F" | column -t -s $'\t'                                   # peek at a few rows
+awk -F'\t' 'NR>1 && $4>=100 {n++; c+=$3} END {print n, c}' "$F"     # GSC query page clicks impressions ...
+duckdb -c "SELECT page, sum(clicks) c, sum(impressions) i FROM read_csv('$F', delim='\t', header=true) GROUP BY 1 ORDER BY c DESC LIMIT 20"
+mlr --itsv --opprint stats1 -a sum -f sessions,key_events -g source_medium then sort -nr sessions_sum then head -n 20 "$F"
+python3 -c "import csv,sys; r=csv.DictReader(open(sys.argv[1]), delimiter='\t', quoting=csv.QUOTE_NONE); print(sum(float(x['clicks'] or 0) for x in r))" "$F"
+```
+Join GA4 landing pages with GSC pages in duckdb (normalize the GSC URL to a path first):
+```bash
+duckdb -c "WITH g AS (SELECT landing_page p, sessions, key_events FROM read_csv('$GA', delim='\t', header=true)),
+  s AS (SELECT regexp_replace(regexp_replace(page, '^https?://[^/]+', ''), '\?.*$', '') p, sum(clicks) clicks, sum(impressions) impressions
+        FROM read_csv('$GSC', delim='\t', header=true) GROUP BY 1)
+  SELECT s.p, clicks, impressions, sessions, key_events FROM s LEFT JOIN g USING (p) ORDER BY clicks DESC LIMIT 30"
+```
+Never `cat` the file or print its rows back into context; print the aggregate you need.
 
 ## GA4
 
@@ -74,7 +117,8 @@ source_medium	sessions	total_users	engagement_rate_pct	purchase_revenue	cost
 - **run_realtime_report** only accepts realtime-compatible dimensions and metrics
   (`unifiedScreenName`, `country`, `deviceCategory`, `activeUsers`, `eventCount`, ...).
 - **run_report** always sends an explicit `limit` to the API (it used to fall back to the API's
-  10 000-row default). Ask for the answer (`order_by`, `limit`, `summary`) instead of paging.
+  10 000-row default). Ask for the answer (`order_by`, `limit`, `summary`) instead of paging; for
+  more rows than fit a page use `output: "file"` (up to 100 000 rows).
 - **get_channel_performance** groups by `sessionSourceMedium`, `sessionCampaignName` and
   `sessionDefaultChannelGroup`. For traffic from a **linked** Google Ads account GA4 also carries
   `advertiserAdCost`, `advertiserAdClicks`, `advertiserAdCostPerClick` and `returnOnAdSpend`, so
@@ -99,7 +143,8 @@ source_medium	sessions	total_users	engagement_rate_pct	purchase_revenue	cost
 - **run_search_analytics**: dates are Pacific Time; the API keeps 16 months. One search `type`
   per query; run separate queries to compare web, image and discover. The API returns at most
   25 000 rows per call, sorted by clicks (by date ascending when grouped by date); `start_row`
-  fetches the next batch. `hour` needs `data_state: hourly_all`.
+  fetches the next batch. `output: "file"` pages through up to 100 000 rows for you (see File
+  output). `hour` needs `data_state: hourly_all`.
 - **inspect_url** reports the indexed version, not a live test. Quota: 2 000 inspections per
   property per day. Mobile usability is deprecated by Google and usually empty.
 - **list_sitemaps** shows URLs submitted per content type; Google no longer reports indexed counts

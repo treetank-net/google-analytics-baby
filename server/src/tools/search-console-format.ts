@@ -84,7 +84,7 @@ export interface SearchAnalyticsView {
   totalsLabel: string;
 }
 
-export function searchAnalyticsView(siteUrl: string, request: SearchAnalyticsRequest, response: GscSearchAnalyticsResponse): SearchAnalyticsView {
+export function searchAnalyticsView(siteUrl: string, request: SearchAnalyticsRequest, response: GscSearchAnalyticsResponse, fileCap = false): SearchAnalyticsView {
   const fetched = response.rows?.length ?? 0;
   const rowLimit = request.rowLimit ?? 0;
   const startRow = request.startRow ?? 0;
@@ -101,7 +101,11 @@ export function searchAnalyticsView(siteUrl: string, request: SearchAnalyticsReq
   }
   const incomplete = response.metadata?.first_incomplete_date || response.metadata?.first_incomplete_hour;
   if (incomplete) notes.push(`incomplete from ${incomplete}`);
-  if (rowLimit && fetched >= rowLimit) notes.push(`row_limit ${rowLimit} reached; more rows may exist (start_row: ${startRow + fetched})`);
+  if (rowLimit && fetched >= rowLimit) {
+    notes.push(fileCap
+      ? `capped at ${fetched} rows; more may exist (start_row: ${startRow + fetched})`
+      : `row_limit ${rowLimit} reached; more rows may exist (start_row: ${startRow + fetched})`);
+  }
   if (!fetched) notes.push('no rows: check the dates (2-3 day lag), type and filters');
   const anonymized = request.dimensions.includes('query') ? '; anonymized queries excluded' : '';
   return { scope, notes, totalsLabel: `all ${fetched} fetched${startRow ? ` from start_row ${startRow}` : ''}${anonymized}` };
