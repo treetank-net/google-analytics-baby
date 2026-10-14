@@ -20,8 +20,8 @@
 - [x] `list_search_console_sites` (+ dopasowanie do GA4 po domenie web streamu), `run_search_analytics`, `inspect_url`, `list_sitemaps`.
 - [x] Skill `gsc` (pułapki danych + przepisy SEO).
 - [x] Komunikat przy starym tokenie bez scope'u GSC — zweryfikowany na prawdziwym API (`insufficient_scope` → „run setup_google_auth again”).
-- [ ] Google Cloud Console (projekt klienta OAuth): włączyć „Google Search Console API”, dopisać `webmasters.readonly` do consent screen (przy opublikowanej aplikacji może wymagać weryfikacji).
-- [ ] `setup_google_auth` od zera + 4 toole GSC na realnej property.
+- [x] Google Cloud Console (projekt klienta OAuth): włączyć „Google Search Console API”, dopisać `webmasters.readonly` do consent screen (przy opublikowanej aplikacji może wymagać weryfikacji).
+- [x] `setup_google_auth` od zera + 4 toole GSC na realnej property.
 - [ ] Release skillem `plugin-release` (bump wersji, `## Unreleased` w CHANGELOG → wersja) — dopiero po e2e.
 - Ahrefs / Clarity → osobny plugin `seo-baby`, który korzysta z GSC przez ten plugin.
 
