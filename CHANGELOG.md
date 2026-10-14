@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.5.0
+
+- **`output: "file"`** on `run_report`, `get_channel_performance` and `run_search_analytics`: every shaped row goes to `~/.google-analytics-baby/exports/<table>-<timestamp>.tsv` (plain TSV: header line, tab-delimited, no quoting, no `#` lines); the response is the header, column list, totals and 5 preview rows. Without an explicit `limit`, GA4 requests 100,000 rows and Search Console pages 25,000 at a time up to 100,000. The manual and `gsc` skills document the format with parsing examples, including a GA4 × GSC join in duckdb.
+
 ## v0.4.0
 
 - **Token diet** (see marketing-context-mcp `docs/response-format-contract.md`): one-line tool descriptions, compact `tools/list`, new `google-analytics-manual` skill.
