@@ -61,7 +61,8 @@ mechanizmy bez wiedzy domenowej — nigdy modele danych GA4/Ads/Meta.
 
 #### Source layout (`server/src/`)
 ```
-index.ts            — entrypoint: McpServer, instructions, rejestracja tooli, stdio. Owinięte w main()
+index.ts            — entrypoint: McpServer, rejestracja tooli, compactToolListing, stdio. Owinięte w main()
+instructions.ts     — SERVER_INSTRUCTIONS: wspólne pojęcia raz (property_id, site_url, daty, paginacja)
 config.ts           — GaConfig, getConfigDir() (.google-analytics-baby / GA_BABY_DATA), loadSavedConfig/saveConfig/configFromEnv
 constants.ts        — OAUTH_CLIENT_ID/SECRET, GA_SCOPE, GSC_SCOPE, GA_SCOPES (oba)
 errors.ts           — formatError(), czytelne komunikaty dla GoogleApiError
@@ -71,6 +72,7 @@ search-console.ts   — klient REST GSC, budowanie requestów, walidacja, daty w
 
 tools/
   auth.ts                  — registerAuthTools(): setup_google_auth, update_plugin
+  compact-listing.ts       — compactToolListing(): wycina z tools/list klucze tylko-walidacyjne
   read.ts                  — registerReadTools(): toole read GA4 (JSON)
   search-console.ts        — registerSearchConsoleTools(): list_search_console_sites, run_search_analytics, inspect_url, list_sitemaps
   search-console-format.ts — wiersze/nagłówki TSV dla GSC
@@ -78,7 +80,19 @@ tools/
 ```
 
 Testy: `server/test/smoke.ts` (`npm test`) — czyste funkcje: klasyfikacja błędów, body requestów, walidacja,
-daty, TSV/paginacja. Skill: `skills/gsc/SKILL.md` — pobierany też przez `update_plugin`.
+daty, TSV/paginacja, budżet `tools/list`. Skille: `skills/gsc/SKILL.md` (pułapki GSC) i
+`skills/google-analytics-manual/SKILL.md` (manual tooli) — oba pobiera też `update_plugin`.
+
+### Opisy toolów — jedno zdanie, manual w skillu
+`tools/list` model płaci w każdej sesji, zanim cokolwiek zrobi (spadł z 12 831 do ~6 000 znaków,
+instrukcje z 1 481 do ~970). Opis toola to jedno zdanie: co zwraca i kiedy go użyć (budżet 200 znaków).
+Opis parametru tylko wtedy, gdy nazwa i schemat nie mówią wszystkiego (budżet 100 znaków): bez opisów
+`property_id`, `site_url`, dat, `page`, `page_chars`, `limit`. Wspólne pojęcia są raz w
+`instructions.ts`, szczegóły i limity w `skills/google-analytics-manual/SKILL.md`, pułapki GSC w
+`skills/gsc/SKILL.md`. `compactToolListing()` wycina ze schematów `$schema`, `additionalProperties`,
+`pattern`, `minLength: 1`, `execution` (zod waliduje dalej). Budżety (i pin rozmiaru `tools/list`)
+pilnuje `testToolListingBudget` w smoke — podniesienie pinu to świadoma decyzja w commicie.
+Kontrakt: `marketing-context-mcp/docs/response-format-contract.md`.
 
 #### OAUTH_CLIENT_ID / OAUTH_CLIENT_SECRET
 `constants.ts` celowo nie zawiera wbudowanych OAuth credentials. Użytkownik podaje własne Client
@@ -102,13 +116,14 @@ W przeciwieństwie do ads NIE ma developer tokena ani MCC approval.
 1. Handler `server.tool('...')` → `tools/read.ts`.
 2. Funkcja klienta (Data/Admin API) → `client.ts`, sygnatura `(cfg: GaConfig, property, ...params) => Promise<unknown>`.
 3. Walidacja wejścia przez zod w handlerze.
-4. `npm run build` po każdej zmianie w `src/`.
+4. Opis: jedno zdanie (≤200 znaków), szczegóły do `skills/google-analytics-manual/SKILL.md`.
+5. `npm run build` po każdej zmianie w `src/`.
 
 **Nowy tool Search Console:**
 1. Handler → `tools/search-console.ts`, owinięty w `handleSearchConsole` (auth check + `formatError`).
 2. Request jako czysta funkcja `...Request()` w `search-console.ts` (testowalna bez sieci) + funkcja `(cfg, siteUrl, ...)` wołająca `gsc()`.
 3. Formatowanie wyniku → `tools/search-console-format.ts`, render przez `tsvDocument` + `paginate` z `tools/format.ts`.
-4. Test w `server/test/smoke.ts`, potem `npm test && npm run build`. Wiedza domenowa dla agenta → `skills/gsc/SKILL.md`.
+4. Test w `server/test/smoke.ts`, potem `npm test && npm run build`. Wiedza domenowa dla agenta → `skills/gsc/SKILL.md`, opis toola → manual.
 
 **Konwencje (rodzina):**
 - NIE pisz komentarzy w kodzie — nazwy funkcji/zmiennych mają być samodokumentujące.

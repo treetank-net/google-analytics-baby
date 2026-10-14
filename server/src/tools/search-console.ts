@@ -47,14 +47,13 @@ async function handleSearchConsole(cfg: GaConfig, fn: () => Promise<string>): Pr
   }
 }
 
-const siteUrlSchema = z.string().min(1)
-  .describe('Search Console property exactly as listed by list_search_console_sites: "sc-domain:example.com" (Domain property) or a URL prefix like "https://www.example.com/"');
+const siteUrlSchema = z.string().min(1);
 
 const filterSchema = z.object({
   dimension: z.enum(GSC_FILTER_DIMENSIONS),
   operator: z.enum(GSC_FILTER_OPERATORS).default('equals'),
   expression: z.string().min(1).max(4096)
-    .describe('Value to match. country = ISO 3166-1 alpha-3 (e.g. "pol"); device = DESKTOP | MOBILE | TABLET; regex operators use RE2 syntax'),
+    .describe('country: ISO alpha-3 (pol); device: DESKTOP|MOBILE|TABLET; regex: RE2'),
 });
 
 export function resolveSearchAnalyticsDates(
@@ -83,10 +82,10 @@ async function safeListWebStreams(cfg: GaConfig): Promise<{ streams?: WebStreamS
 export function registerSearchConsoleTools(server: McpServer, cfg: GaConfig) {
   server.tool(
     'list_search_console_sites',
-    'List the Google Search Console properties the authorized user can access, with permission level and property kind (Domain "sc-domain:" vs URL prefix). Start here for any Search Console question — the site_url values are the exact identifiers the other Search Console tools need. Optionally match each property to GA4 properties by web stream domain.',
+    'Search Console properties the user can access (Domain or URL prefix) with permission level; start here.',
     {
       match_ga4_properties: z.boolean().default(false)
-        .describe('Also list GA4 properties whose web data stream host matches the site (one GA4 Admin call per property — slower on large accounts). The match is a domain hint, not a verified link.'),
+        .describe('Add GA4 properties whose web stream host matches (a hint; slower on many properties)'),
       page: pageSchema,
       page_chars: pageCharsSchema,
     },
@@ -110,23 +109,23 @@ export function registerSearchConsoleTools(server: McpServer, cfg: GaConfig) {
 
   server.tool(
     'run_search_analytics',
-    'Query Google Search Console performance data (clicks, impressions, CTR, average position) for one property, grouped by query/page/country/device/date/searchAppearance. Dates are in Pacific Time and data lags 2-3 days; the API keeps 16 months. Rows with the query dimension omit anonymized queries, so they never add up to the property total. See the gsc skill for aggregation pitfalls and recipes.',
+    'Search Console clicks, impressions, CTR and average position for one property, grouped by query, page, country, device, date or appearance.',
     {
       site_url: siteUrlSchema,
       dimensions: z.array(z.enum(GSC_DIMENSIONS)).default([])
-        .describe('Grouping dimensions in order, e.g. ["query"], ["page", "query"], ["date"]. Empty = one total row. "hour" needs data_state hourly_all.'),
+        .describe('Group-by order, e.g. ["page","query"]; [] = one total row'),
       filters: z.array(filterSchema).default([])
-        .describe('Filters, all combined with AND (the API has no OR — use a regex operator for alternatives), e.g. [{"dimension":"page","operator":"contains","expression":"/blog/"}]'),
-      date_range: z.string().optional().describe('Named range, e.g. "last7days", "last28days", "last90days". If set, overrides start_date/end_date.'),
-      start_date: z.string().optional().describe('YYYY-MM-DD, "today", "yesterday" or "NdaysAgo" (Pacific Time). Default 28daysAgo.'),
-      end_date: z.string().optional().describe('YYYY-MM-DD, "today", "yesterday" or "NdaysAgo" (Pacific Time). Default today.'),
-      type: z.enum(GSC_SEARCH_TYPES).default('web').describe('Search type. One type per query — run separate queries to compare web vs image vs discover.'),
-      data_state: z.enum(GSC_DATA_STATES).optional().describe('final (default) = finalized data only; all = include fresh, still-changing data; hourly_all = hourly breakdown (with the hour dimension)'),
+        .describe('Combined with AND; use a regex operator for OR'),
+      date_range: z.string().optional(),
+      start_date: z.string().optional().describe('Default 28daysAgo'),
+      end_date: z.string().optional(),
+      type: z.enum(GSC_SEARCH_TYPES).default('web'),
+      data_state: z.enum(GSC_DATA_STATES).optional().describe('final (default); all adds fresh data; hourly_all is required by hour'),
       aggregation_type: z.enum(GSC_AGGREGATION_TYPES).optional()
-        .describe('auto (default): byProperty unless grouped/filtered by page. byPage counts each URL separately (higher impressions); byProperty counts the site once per search (matches the chart total). byProperty cannot be used with page.'),
+        .describe('auto (default); byProperty = chart totals, not with page; byPage counts each URL'),
       row_limit: z.number().int().min(1).max(GSC_MAX_ROW_LIMIT).default(GSC_DEFAULT_ROW_LIMIT)
-        .describe(`Rows fetched from the API (1-${GSC_MAX_ROW_LIMIT}, default ${GSC_DEFAULT_ROW_LIMIT}). Rows come sorted by clicks descending (by date ascending when grouped by date).`),
-      start_row: z.number().int().min(0).default(0).describe('Zero-based API offset for fetching the next batch when row_limit was reached'),
+        .describe('Rows fetched from the API, sorted by clicks'),
+      start_row: z.number().int().min(0).default(0).describe('API offset for the next batch'),
       page: pageSchema,
       page_chars: pageCharsSchema,
     },
@@ -158,11 +157,11 @@ export function registerSearchConsoleTools(server: McpServer, cfg: GaConfig) {
 
   server.tool(
     'inspect_url',
-    'Inspect one URL with the Search Console URL Inspection API: index verdict and coverage state, robots.txt and noindex state, page fetch result, last crawl time and crawler, Google-selected vs user-declared canonical, sitemaps listing the URL, referring URLs, rich results, AMP and (deprecated) mobile usability. Reports the indexed version, not a live test. Quota: 2000 inspections per property per day.',
+    'URL Inspection of one URL as Google indexed it: verdict, coverage, robots, canonical, last crawl, sitemaps and rich results.',
     {
       site_url: siteUrlSchema,
-      url: z.string().url().describe('Fully qualified URL to inspect; it must belong to site_url'),
-      language_code: z.string().optional().describe('BCP-47 language for issue messages, e.g. "pl" (default en-US)'),
+      url: z.string().url().describe('Must belong to site_url'),
+      language_code: z.string().optional().describe('BCP-47 for issue messages, e.g. pl'),
     },
     async ({ site_url, url, language_code }) => handleSearchConsole(cfg, async () => {
       const siteUrl = normalizeSiteUrl(site_url);
@@ -173,10 +172,10 @@ export function registerSearchConsoleTools(server: McpServer, cfg: GaConfig) {
 
   server.tool(
     'list_sitemaps',
-    'List the sitemaps submitted for a Search Console property: type, index or not, pending, last submitted/downloaded, error and warning counts, and submitted URL counts per content type. Pass sitemap_index to list the children of one sitemap index.',
+    'Sitemaps submitted for a Search Console property with status, errors, warnings and submitted URL counts.',
     {
       site_url: siteUrlSchema,
-      sitemap_index: z.string().url().optional().describe('URL of a sitemap index to list its child sitemaps'),
+      sitemap_index: z.string().url().optional().describe('List the children of this sitemap index'),
       page: pageSchema,
       page_chars: pageCharsSchema,
     },

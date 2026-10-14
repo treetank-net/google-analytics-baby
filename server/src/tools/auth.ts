@@ -88,7 +88,7 @@ async function fetchChangelog(fromVer: string, toVer: string): Promise<string> {
 export function registerAuthTools(server: McpServer, cfg: GaConfig) {
   server.tool(
     'setup_google_auth',
-    'Start Google OAuth flow for Google Analytics and Google Search Console (both read-only). Returns a URL for the user to click. After authorization the refresh token is saved automatically. Run it again when a Search Console tool reports that access was not granted — authorizations made before Search Console support cover Analytics only.',
+    'Authorize read-only Google Analytics and Search Console access in the browser; rerun when Search Console access is missing.',
     {},
     async () => {
       const { shortUrl } = startAuthFlow(cfg);
@@ -109,7 +109,7 @@ export function registerAuthTools(server: McpServer, cfg: GaConfig) {
 
   server.tool(
     'update_plugin',
-    'Check for plugin updates and download them. Reports the version installed on disk separately from the version this process is actually running, because a running MCP server cannot swap its own bundle — the download only takes effect after a session restart.',
+    'Download the latest plugin version; it activates after a session restart.',
     {},
     async () => {
       const installedVer = getInstalledVersion();
@@ -140,6 +140,7 @@ export function registerAuthTools(server: McpServer, cfg: GaConfig) {
           ['scripts/start-mcp.js', join(root, 'scripts', 'start-mcp.js')],
           ['CHANGELOG.md', join(root, 'CHANGELOG.md')],
           ['skills/gsc/SKILL.md', join(root, 'skills', 'gsc', 'SKILL.md')],
+          ['skills/google-analytics-manual/SKILL.md', join(root, 'skills', 'google-analytics-manual', 'SKILL.md')],
         ];
         for (const [remote, local] of files) {
           const ok = await downloadFile(remote, local);

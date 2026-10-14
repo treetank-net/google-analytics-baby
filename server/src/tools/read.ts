@@ -47,34 +47,34 @@ async function handleRead(cfg: GaConfig, fn: () => Promise<unknown>) {
 export function registerReadTools(server: McpServer, cfg: GaConfig) {
   server.tool(
     'list_analytics_properties',
-    'List all Google Analytics 4 properties the authorized user can access, grouped by account, including linked Google Ads accounts. Start here to map account ↔ property ↔ Ads links before any report.',
+    'GA4 properties the user can access, with their account and linked Google Ads customer ids; start here.',
     {
-      account_filter: z.string().optional().describe('Optional account resource name or display name substring to filter by'),
+      account_filter: z.string().optional().describe('Account id or name substring'),
     },
     async ({ account_filter }) => handleRead(cfg, () => listPropertySummaries(cfg, account_filter)),
   );
 
   server.tool(
     'get_property_details',
-    'Get configuration details for a single GA4 property: time zone, currency, industry, data streams, and linked Google Ads accounts.',
+    'One GA4 property\'s configuration: time zone, currency, industry, data streams and linked Google Ads ids.',
     {
-      property_id: z.string().describe('GA4 property ID (numeric, e.g. "123456789") or resource name (e.g. "properties/123456789")'),
+      property_id: z.string(),
     },
     async ({ property_id }) => handleRead(cfg, () => getPropertyDetails(cfg, property_id)),
   );
 
   server.tool(
     'run_report',
-    'Run a generic GA4 Data API report. Specify dimensions, metrics and a date range. Returns dimension/metric rows.',
+    'Custom GA4 report: any dimensions and metrics over a date range, as a table.',
     {
-      property_id: z.string().describe('GA4 property ID or resource name'),
-      dimensions: z.array(z.string()).default([]).describe('GA4 dimension API names, e.g. ["sessionSourceMedium", "date"]'),
-      metrics: z.array(z.string()).min(1).describe('GA4 metric API names, e.g. ["sessions", "conversions", "totalRevenue"]'),
-      date_range: z.string().optional().describe('Named range, e.g. "last7days", "last30days". If set, overrides start_date/end_date.'),
-      start_date: z.string().optional().describe('ISO date (YYYY-MM-DD) or relative like "7daysAgo"'),
-      end_date: z.string().optional().describe('ISO date (YYYY-MM-DD) or "today"'),
-      limit: z.number().int().positive().optional().describe('Max rows to return'),
-      dimension_filter: z.string().optional().describe('Optional filter expression on a dimension, e.g. sessionSourceMedium == "google / cpc"'),
+      property_id: z.string(),
+      dimensions: z.array(z.string()).default([]).describe('GA4 API names, e.g. ["sessionSourceMedium","date"]'),
+      metrics: z.array(z.string()).min(1).describe('GA4 API names, e.g. ["sessions","keyEvents","totalRevenue"]'),
+      date_range: z.string().optional(),
+      start_date: z.string().optional(),
+      end_date: z.string().optional(),
+      limit: z.number().int().positive().optional(),
+      dimension_filter: z.string().optional().describe('dim == "value" or dim contains "value"'),
     },
     async (input) => handleRead(cfg, () => {
       const { startDate, endDate } = dateRangeFromInput(input);
@@ -91,12 +91,12 @@ export function registerReadTools(server: McpServer, cfg: GaConfig) {
 
   server.tool(
     'run_realtime_report',
-    'Run a GA4 realtime report (last 30 minutes of activity). Specify realtime dimensions and metrics.',
+    'GA4 realtime report: activity in the last 30 minutes by realtime dimensions and metrics.',
     {
-      property_id: z.string().describe('GA4 property ID or resource name'),
-      dimensions: z.array(z.string()).default([]).describe('Realtime dimension API names, e.g. ["unifiedScreenName"]'),
-      metrics: z.array(z.string()).min(1).describe('Realtime metric API names, e.g. ["activeUsers"]'),
-      limit: z.number().int().positive().optional().describe('Max rows to return'),
+      property_id: z.string(),
+      dimensions: z.array(z.string()).default([]).describe('e.g. ["unifiedScreenName"]'),
+      metrics: z.array(z.string()).min(1).describe('e.g. ["activeUsers"]'),
+      limit: z.number().int().positive().optional(),
     },
     async (input) => handleRead(cfg, () => runRealtimeReport(cfg, input.property_id, {
       dimensions: input.dimensions,
@@ -107,19 +107,19 @@ export function registerReadTools(server: McpServer, cfg: GaConfig) {
 
   server.tool(
     'get_custom_dimensions_and_metrics',
-    'List the custom dimensions and custom metrics configured on a GA4 property so they can be used in run_report.',
+    'Custom dimensions and metrics defined on a GA4 property, with the API names run_report accepts.',
     {
-      property_id: z.string().describe('GA4 property ID or resource name'),
+      property_id: z.string(),
     },
     async ({ property_id }) => handleRead(cfg, () => getCustomDimensionsAndMetrics(cfg, property_id)),
   );
 
   server.tool(
     'get_channel_performance',
-    'Closed-loop channel performance. Returns per source/medium/campaign: sessions, conversions, revenue and engagement. For traffic from a LINKED Google Ads account it additionally returns advertiserAdCost, advertiserAdClicks, advertiserAdCostPerClick and returnOnAdSpend — a complete ROAS picture straight from the GA4 Data API, with no call to the Ads API. Note: for Meta, GA4 only has outcomes attributed by source/medium (e.g. "facebook / cpc"); spend must be joined from meta-ads-baby and correlated on source/medium.',
+    'Sessions, conversions, revenue and Google Ads cost/clicks/ROAS per source/medium/campaign for a lookback window.',
     {
-      property_id: z.string().describe('GA4 property ID or resource name'),
-      days: z.number().int().positive().default(30).describe('Lookback window in days'),
+      property_id: z.string(),
+      days: z.number().int().positive().default(30),
     },
     async ({ property_id, days }) => handleRead(cfg, () => getChannelPerformance(cfg, property_id, days)),
   );

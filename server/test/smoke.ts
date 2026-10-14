@@ -22,6 +22,12 @@ import {
 } from '../src/tools/search-console-format.js';
 import { resolveSearchAnalyticsDates } from '../src/tools/search-console.js';
 import { GA_SCOPES, GSC_SCOPE } from '../src/constants.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { registerAuthTools } from '../src/tools/auth.js';
+import { registerReadTools } from '../src/tools/read.js';
+import { registerSearchConsoleTools } from '../src/tools/search-console.js';
+import { compactSchema, compactToolListing } from '../src/tools/compact-listing.js';
+import { SERVER_INSTRUCTIONS } from '../src/instructions.js';
 
 let passed = 0;
 let failed = 0;
@@ -254,7 +260,55 @@ function testSearchConsoleFormat() {
   assert('sitemap counts parsed', sitemap.errors === 2 && sitemap.warnings === 0 && sitemap.submitted_urls === 'web:120');
 }
 
-function main() {
+const LISTING_BUDGET_CHARS = 15_000;
+const LISTING_PIN_CHARS = 6_500;
+const INSTRUCTIONS_BUDGET_CHARS = 2_500;
+const TOOL_DESCRIPTION_BUDGET = 200;
+const PARAM_DESCRIPTION_BUDGET = 100;
+
+async function listedTools(): Promise<any[]> {
+  const server = new McpServer({ name: 'smoke', version: '0.0.0' });
+  const cfg = { clientId: '', clientSecret: '', refreshToken: '' };
+  registerAuthTools(server, cfg);
+  registerReadTools(server, cfg);
+  registerSearchConsoleTools(server, cfg);
+  compactToolListing(server);
+  const handler = (server.server as any)._requestHandlers.get('tools/list');
+  const listing = await handler({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }, {});
+  return listing.tools;
+}
+
+function paramDescriptions(schema: unknown, path: string, out: Array<[string, string]>): void {
+  if (Array.isArray(schema)) return schema.forEach((item) => paramDescriptions(item, path, out));
+  if (!schema || typeof schema !== 'object') return;
+  for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
+    if (key === 'description' && typeof value === 'string') out.push([path, value]);
+    else paramDescriptions(value, key === 'properties' || key === 'items' ? path : `${path}.${key}`, out);
+  }
+}
+
+async function testToolListingBudget() {
+  console.log('\n--- Tool listing budget ---');
+  const compacted = compactSchema({ type: 'object', $schema: 'x', additionalProperties: false, properties: { pattern: { type: 'string', minLength: 1, maxLength: 30 } } }) as any;
+  assert('compaction drops validation-only keys', !('$schema' in compacted) && !('additionalProperties' in compacted));
+  assert('compaction keeps a property named like a dropped key', compacted.properties.pattern.maxLength === 30 && !('minLength' in compacted.properties.pattern));
+
+  const tools = await listedTools();
+  const size = JSON.stringify(tools).length;
+  assert(`tools/list within the contract budget ${LISTING_BUDGET_CHARS}`, size <= LISTING_BUDGET_CHARS, `${size} chars`);
+  assert(`tools/list pinned at ${LISTING_PIN_CHARS} chars`, size <= LISTING_PIN_CHARS, `${size} chars — trim descriptions or raise the pin deliberately`);
+  assert('tools/list carries no taskSupport boilerplate', !tools.some((tool) => tool.execution));
+  assert(`server instructions within ${INSTRUCTIONS_BUDGET_CHARS}`, SERVER_INSTRUCTIONS.length <= INSTRUCTIONS_BUDGET_CHARS, String(SERVER_INSTRUCTIONS.length));
+
+  const longTools = tools.filter((tool) => (tool.description ?? '').length > TOOL_DESCRIPTION_BUDGET).map((tool) => `${tool.name} (${tool.description.length})`);
+  assert(`every tool description is at most ${TOOL_DESCRIPTION_BUDGET} chars`, longTools.length === 0, longTools.join(', '));
+  const params: Array<[string, string]> = [];
+  for (const tool of tools) paramDescriptions(tool.inputSchema, tool.name, params);
+  const longParams = params.filter(([, text]) => text.length > PARAM_DESCRIPTION_BUDGET).map(([path, text]) => `${path} (${text.length})`);
+  assert(`every parameter description is at most ${PARAM_DESCRIPTION_BUDGET} chars`, longParams.length === 0, longParams.join(', '));
+}
+
+async function main() {
   testScopes();
   testErrorClassification();
   testSiteUrls();
@@ -263,6 +317,7 @@ function main() {
   testDates();
   testFormat();
   testSearchConsoleFormat();
+  await testToolListingBudget();
 
   console.log(`\n--- Results: ${passed} passed, ${failed} failed ---`);
   process.exit(failed > 0 ? 1 : 0);

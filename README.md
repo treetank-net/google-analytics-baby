@@ -36,7 +36,8 @@ Search Console:
 - `inspect_url` — URL Inspection: index status, canonical, robots, last crawl, rich results.
 - `list_sitemaps` — submitted sitemaps with errors and URL counts.
 
-The `gsc` skill covers Search Console pitfalls (data lag, anonymized queries, byPage vs byProperty)
-and analysis recipes.
+Tool descriptions are one line each to keep the tool manifest small. The `google-analytics-manual`
+skill documents every tool in detail; the `gsc` skill covers Search Console pitfalls (data lag,
+anonymized queries, byPage vs byProperty) and analysis recipes.
 
 See `CLAUDE.md` for architecture and `ROADMAP.md` for what's implemented.
