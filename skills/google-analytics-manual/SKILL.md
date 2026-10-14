@@ -22,6 +22,47 @@ analysis pitfalls (data lag, anonymized queries, byPage vs byProperty) live in t
 | Is a URL indexed, which canonical did Google pick | `inspect_url` |
 | Sitemap status | `list_sitemaps` |
 
+## Reading table output
+
+Every list-shaped tool returns the same TSV layout:
+
+```
+# GA4 report · property 123 · last 30d · currency=PLN · showing top 100 of 812 by -sessions
+# date=2026-10-01                                   <- columns constant across all rows
+# totals (all 812): sessions=18230 purchase_revenue=51234.99 cost=9876.54
+source_medium	sessions	total_users	engagement_rate_pct	purchase_revenue	cost
+```
+
+- **Column names** are GA4 API names in snake_case (`sessionSourceMedium` would be
+  `session_source_medium`), with family aliases: `source_medium` (sessionSourceMedium), `campaign`
+  (sessionCampaignName), `channel_group` (sessionDefaultChannelGroup), `views` (screenPageViews),
+  and the linked Google Ads metrics `cost` (advertiserAdCost), `clicks` (advertiserAdClicks),
+  `impressions` (advertiserAdImpressions), `cpc` (advertiserAdCostPerClick), `roas`
+  (returnOnAdSpend). `fields` and `order_by` accept either the column or the API name.
+- **Values**: GA4 returns rates as fractions; they come back as percent with a `_pct` suffix
+  (`engagement_rate_pct`, `bounce_rate_pct`, also `dau_per_mau_pct`). Money (`TYPE_CURRENCY`
+  metrics) has 2 decimals in the property currency from the header. Durations are seconds. Other
+  floats: 2 decimals when ≥ 1, else 3 significant digits. Dates are ISO (`date` 20261001 →
+  2026-10-01, `yearMonth` → 2026-10).
+- **Empty columns are dropped; constant columns move to the second `#` line.**
+- **Totals** cover all matching rows, not just the shown ones, and only additive metrics: sessions,
+  engaged sessions, views, event count, key events, revenue, cost, clicks, impressions,
+  transactions. Users and rates are never summed (re-query without the dimension for a true total).
+  GA4 computes them, so they stay correct even where sessions repeat across rows (e.g. by `pagePath`).
+- **Header notes** appear only when they apply: `thresholded` (GA4 withheld rows with few users),
+  `sampled`, `(other) row` (high-cardinality values grouped), `capped at N` (see min_* below).
+
+### Shaping parameters
+
+| Param | Meaning |
+|---|---|
+| `fields` | Columns to return (default: all requested) |
+| `order_by` | Column, `-column` for descending. Default: the time dimension ascending if there is one, else `-<first metric>`; `get_channel_performance` `-sessions`; `run_search_analytics` `-clicks` (`date` when grouped by date) |
+| `limit` | Top-N rows. Default 100 (`get_channel_performance` 50). For GA4 the limit and order go to the API, so only N rows are fetched; the header still says "of M" |
+| `summary` | Header and totals only, no rows (GA4 fetches a single row) |
+| `min_cost`, `min_clicks`, `min_impressions` | Drop rows below the threshold. GA4: they need the advertiser metric (`advertiserAdCost`, `advertiserAdClicks`, `advertiserAdImpressions`), are sent as a metric filter, and up to 10 000 rows are fetched so totals can be summed over the filtered rows (`capped at` if more match). Search Console: `min_impressions`, `min_clicks` |
+| `page`, `page_chars` | Pages of the shaped table, by size (default 12 000 chars, 2 000-100 000) |
+
 ## GA4
 
 - **property_id** accepts `123456789` or `properties/123456789`.
@@ -32,12 +73,19 @@ analysis pitfalls (data lag, anonymized queries, byPage vs byProperty) live in t
   condition: `dim == "value"` (exact) or `dim contains "value"`, both case-insensitive.
 - **run_realtime_report** only accepts realtime-compatible dimensions and metrics
   (`unifiedScreenName`, `country`, `deviceCategory`, `activeUsers`, `eventCount`, ...).
+- **run_report** always sends an explicit `limit` to the API (it used to fall back to the API's
+  10 000-row default). Ask for the answer (`order_by`, `limit`, `summary`) instead of paging.
 - **get_channel_performance** groups by `sessionSourceMedium`, `sessionCampaignName` and
   `sessionDefaultChannelGroup`. For traffic from a **linked** Google Ads account GA4 also carries
   `advertiserAdCost`, `advertiserAdClicks`, `advertiserAdCostPerClick` and `returnOnAdSpend`, so
   closed-loop ROAS needs no call to the Google Ads API. Rows from other sources leave those empty.
+  Columns: `source_medium`, `campaign`, `channel_group`, `sessions`, `engaged_sessions`, `key_events`,
+  `total_revenue`, `cost`, `clicks`, `cpc`, `roas`. `min_cost: 1` keeps only paid Google Ads rows.
 - **Meta** does not link cost into GA4: GA4 only has outcomes attributed by source/medium
   (`facebook / cpc`). Take spend from `meta-ads-baby` and join on source/medium.
+- **get_property_details** and **get_custom_dimensions_and_metrics** return `#` header lines plus
+  TSV sections (data streams; custom dimensions and metrics with the `api_name` to use in run_report,
+  e.g. `customEvent:plan_type`, `customUser:tier`).
 - **list_analytics_properties** calls the Admin API once per property to read Google Ads links; on
   large accounts narrow it with `account_filter`.
 

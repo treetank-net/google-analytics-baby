@@ -1,4 +1,5 @@
 import type { WebStreamSummary } from '../client.js';
+import { isoSeconds, roundTo, snakeCase, type Row } from './table.js';
 import type {
   GscDimension,
   GscSearchAnalyticsResponse,
@@ -37,96 +38,109 @@ export function siteMatchesStream(siteUrl: string, streamUri: string): boolean {
   return withoutWww(streamHost) === withoutWww(host);
 }
 
-export function siteRows(sites: GscSiteEntry[], streams?: WebStreamSummary[]): Record<string, unknown>[] {
+export function siteRows(sites: GscSiteEntry[], streams?: WebStreamSummary[]): Row[] {
   return [...sites]
     .sort((a, b) => (a.siteUrl || '').localeCompare(b.siteUrl || ''))
     .map((site) => {
       const siteUrl = site.siteUrl || '';
-      const row: Record<string, unknown> = {
+      const row: Row = {
         site_url: siteUrl,
         kind: siteKind(siteUrl),
-        permission: site.permissionLevel || '',
+        permission: site.permissionLevel || undefined,
       };
       if (streams) {
         const matched = streams.filter((stream) => siteMatchesStream(siteUrl, stream.defaultUri));
-        row.ga4_properties = [...new Set(matched.map((stream) => `${stream.property} ${stream.displayName}`.trim()))].join(' ~ ');
+        row.ga4_properties = [...new Set(matched.map((stream) => `${stream.property.replace(/^properties\//, '')} ${stream.displayName}`.trim()))].join(' ~ ') || undefined;
       }
       return row;
     });
 }
 
-function round(value: unknown, digits: number): unknown {
-  return typeof value === 'number' && Number.isFinite(value) ? Number(value.toFixed(digits)) : value;
+export function searchAnalyticsColumn(dimension: GscDimension): string {
+  return snakeCase(dimension);
 }
 
-export function searchAnalyticsRows(dimensions: GscDimension[], response: GscSearchAnalyticsResponse): Record<string, unknown>[] {
+export function searchAnalyticsRows(dimensions: GscDimension[], response: GscSearchAnalyticsResponse): Row[] {
   return (response.rows || []).map((row) => {
-    const out: Record<string, unknown> = {};
-    dimensions.forEach((dimension, i) => { out[dimension] = row.keys?.[i] ?? ''; });
+    const out: Row = {};
+    dimensions.forEach((dimension, i) => { out[searchAnalyticsColumn(dimension)] = row.keys?.[i] || undefined; });
     out.clicks = row.clicks ?? 0;
     out.impressions = row.impressions ?? 0;
-    out.ctr = round(row.ctr ?? 0, 4);
-    out.position = round(row.position ?? 0, 2);
+    out.ctr_pct = roundTo((row.ctr ?? 0) * 100, 2);
+    out.position = roundTo(row.position ?? 0, 1);
     return out;
   });
 }
 
-export function searchAnalyticsHeader(siteUrl: string, request: SearchAnalyticsRequest, response: GscSearchAnalyticsResponse): string[] {
+export function searchAnalyticsDefaultOrder(dimensions: GscDimension[]): string {
+  if (dimensions.includes('date')) return 'date';
+  if (dimensions.includes('hour')) return 'hour';
+  return '-clicks';
+}
+
+export interface SearchAnalyticsView {
+  scope: string[];
+  notes: string[];
+  totalsLabel: string;
+}
+
+export function searchAnalyticsView(siteUrl: string, request: SearchAnalyticsRequest, response: GscSearchAnalyticsResponse): SearchAnalyticsView {
   const fetched = response.rows?.length ?? 0;
   const rowLimit = request.rowLimit ?? 0;
   const startRow = request.startRow ?? 0;
-  const lines = [
-    `# Search Console ${request.type} for ${siteUrl}, ${request.startDate}..${request.endDate} (Pacific Time)`,
-    `dimensions: ${request.dimensions.length ? request.dimensions.join(', ') : '(none — one total row)'}; aggregation: ${response.responseAggregationType || request.aggregationType || 'auto'}; data_state: ${request.dataState || 'final'}; rows fetched: ${fetched} from start_row ${startRow}.`,
-    'ctr is a fraction (0.0312 = 3.12%); position is the average position (1 = top).',
+  const scope = [
+    siteUrl,
+    ...(request.type !== 'web' ? [`type=${request.type}`] : []),
+    `${request.startDate}..${request.endDate} PT`,
+    ...(request.dataState && request.dataState !== 'final' ? [`data_state=${request.dataState}`] : []),
+    ...(request.aggregationType && request.aggregationType !== 'auto' ? [`aggregation=${request.aggregationType}`] : []),
   ];
+  const notes: string[] = [];
   if (request.filters.length) {
-    lines.push(`filters (AND): ${request.filters.map((filter) => `${filter.dimension} ${filter.operator} "${filter.expression}"`).join('; ')}`);
+    notes.push(`where ${request.filters.map((filter) => `${filter.dimension} ${filter.operator} "${filter.expression}"`).join(' and ')}`);
   }
-  if (response.metadata?.first_incomplete_date) lines.push(`Data from ${response.metadata.first_incomplete_date} onward is incomplete and may still change.`);
-  if (response.metadata?.first_incomplete_hour) lines.push(`Data from ${response.metadata.first_incomplete_hour} onward is incomplete and may still change.`);
-  if (rowLimit && fetched >= rowLimit) {
-    lines.push(`row_limit ${rowLimit} reached — more rows may exist in the API. Call again with start_row: ${startRow + fetched} to fetch the next batch.`);
-  }
-  if (request.dimensions.includes('query')) {
-    lines.push('Rows with the query dimension omit anonymized queries, so they add up to less than the property total.');
-  }
-  return lines;
+  const incomplete = response.metadata?.first_incomplete_date || response.metadata?.first_incomplete_hour;
+  if (incomplete) notes.push(`incomplete from ${incomplete}`);
+  if (rowLimit && fetched >= rowLimit) notes.push(`row_limit ${rowLimit} reached; more rows may exist (start_row: ${startRow + fetched})`);
+  if (!fetched) notes.push('no rows: check the dates (2-3 day lag), type and filters');
+  const anonymized = request.dimensions.includes('query') ? '; anonymized queries excluded' : '';
+  return { scope, notes, totalsLabel: `all ${fetched} fetched${startRow ? ` from start_row ${startRow}` : ''}${anonymized}` };
 }
 
-function count(value: unknown): unknown {
+function count(value: unknown): number | string | undefined {
+  if (typeof value === 'number') return value;
   if (typeof value === 'string' && /^\d+$/.test(value)) return Number(value);
-  return value ?? '';
+  return value === undefined || value === null || value === '' ? undefined : String(value);
 }
 
-export function sitemapRows(sitemaps: GscSitemap[]): Record<string, unknown>[] {
+export function sitemapRows(sitemaps: GscSitemap[]): Row[] {
   return sitemaps.map((sitemap) => ({
-    path: sitemap.path || '',
-    type: sitemap.type || '',
+    path: sitemap.path || undefined,
+    type: sitemap.type || undefined,
     is_index: sitemap.isSitemapsIndex ?? false,
     is_pending: sitemap.isPending ?? false,
-    last_submitted: sitemap.lastSubmitted || '',
-    last_downloaded: sitemap.lastDownloaded || '',
+    last_submitted: isoSeconds(sitemap.lastSubmitted),
+    last_downloaded: isoSeconds(sitemap.lastDownloaded),
     errors: count(sitemap.errors ?? 0),
     warnings: count(sitemap.warnings ?? 0),
-    submitted_urls: (sitemap.contents || []).map((content) => `${content.type || '?'}:${count(content.submitted ?? 0)}`).join(' ~ '),
+    submitted_urls: (sitemap.contents || []).map((content) => `${content.type || '?'}:${count(content.submitted ?? 0)}`).join(' ~ ') || undefined,
   }));
 }
 
-function keyValueRows(pairs: Array<[string, unknown]>): Record<string, unknown>[] {
+function keyValueRows(pairs: Array<[string, unknown]>): Row[] {
   return pairs
-    .filter(([, value]) => value !== undefined && value !== null && value !== '')
-    .map(([field, value]) => ({ field, value: Array.isArray(value) ? value.join(' ~ ') : value }));
+    .filter(([, value]) => value !== undefined && value !== null && value !== '' && !(Array.isArray(value) && !value.length))
+    .map(([field, value]) => ({ field, value: Array.isArray(value) ? value.join(' ~ ') : String(value) }));
 }
 
 function canonicalVerdict(googleCanonical?: string, userCanonical?: string): string | undefined {
   if (!googleCanonical || !userCanonical) return undefined;
-  return googleCanonical === userCanonical ? 'same' : 'DIFFERENT — Google chose another canonical than the page declares';
+  return googleCanonical === userCanonical ? 'same' : 'DIFFERENT';
 }
 
-export function inspectionSections(result: any): Array<[string, unknown[]]> {
+export function inspectionSections(result: any): Array<[string, Row[]]> {
   const index = result?.indexStatusResult ?? {};
-  const sections: Array<[string, unknown[]]> = [[
+  const sections: Array<[string, Row[]]> = [[
     'index status',
     keyValueRows([
       ['verdict', index.verdict],
@@ -134,7 +148,7 @@ export function inspectionSections(result: any): Array<[string, unknown[]]> {
       ['indexing_state', index.indexingState],
       ['robots_txt_state', index.robotsTxtState],
       ['page_fetch_state', index.pageFetchState],
-      ['last_crawl_time', index.lastCrawlTime],
+      ['last_crawl_time', isoSeconds(index.lastCrawlTime)],
       ['crawled_as', index.crawledAs],
       ['google_canonical', index.googleCanonical],
       ['user_canonical', index.userCanonical],
@@ -147,9 +161,9 @@ export function inspectionSections(result: any): Array<[string, unknown[]]> {
   const richItems = (result?.richResultsResult?.detectedItems ?? []).flatMap((detected: any) => {
     const items = detected.items?.length ? detected.items : [{}];
     return items.map((item: any) => ({
-      rich_result_type: detected.richResultType || '',
-      item: item.name || '',
-      issues: (item.issues || []).map((issue: any) => `${issue.severity || ''} ${issue.issueMessage || ''}`.trim()).join(' ~ '),
+      rich_result_type: detected.richResultType || undefined,
+      item: item.name || undefined,
+      issues: (item.issues || []).map((issue: any) => `${issue.severity || ''} ${issue.issueMessage || ''}`.trim()).join(' ~ ') || undefined,
     }));
   });
   if (result?.richResultsResult) {
@@ -159,8 +173,8 @@ export function inspectionSections(result: any): Array<[string, unknown[]]> {
   if (result?.mobileUsabilityResult) {
     const mobile = result.mobileUsabilityResult;
     sections.push([
-      `mobile usability (verdict ${mobile.verdict || '?'}; deprecated by Google, may be empty)`,
-      (mobile.issues || []).map((issue: any) => ({ issue: issue.issueType || '', message: issue.message || '' })),
+      `mobile usability (verdict ${mobile.verdict || '?'})`,
+      (mobile.issues || []).map((issue: any) => ({ issue: issue.issueType || undefined, message: issue.message || undefined })),
     ]);
   }
 
@@ -178,9 +192,7 @@ export function inspectionSections(result: any): Array<[string, unknown[]]> {
 }
 
 export function inspectionHeader(siteUrl: string, inspectionUrl: string, result: any): string[] {
-  const lines = [`# URL Inspection: ${inspectionUrl} (property ${siteUrl})`];
-  if (!result?.richResultsResult) lines.push('No rich results detected on this URL.');
-  if (result?.inspectionResultLink) lines.push(`Open in Search Console: ${result.inspectionResultLink}`);
-  lines.push('This is the indexed (Google) version, not a live test. Quota: 2000 inspections per site per day.');
+  const lines = [`URL inspection · ${inspectionUrl} · ${siteUrl} · indexed version`];
+  if (!result?.richResultsResult) lines.push('no rich results detected');
   return lines;
 }

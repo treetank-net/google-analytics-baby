@@ -40,11 +40,13 @@ conclusions come from treating Search Console numbers like GA4 numbers — they 
   byPage as soon as you group or filter by `page`. Never compare a page-level total with a site total.
 - **Average position is impression-weighted**, and a page-level average mixes many queries. Do not
   average positions across rows; re-query at the grain you need.
-- **CTR is a fraction** (0.031 = 3.1%). Recompute aggregated CTR as clicks / impressions, never by
+- **CTR comes as `ctr_pct`** (3.1 = 3.1%). Recompute aggregated CTR as clicks / impressions, never by
   averaging row CTRs.
-- **row_limit caps rows, not data.** The API returns up to 25 000 rows per call, sorted by clicks.
-  When the header says the limit was reached, call again with the suggested `start_row`. Long-tail
-  rows with 0 clicks may sit beyond what the API ever returns.
+- **row_limit caps rows fetched, not data.** The API returns up to 25 000 rows per call, sorted by
+  clicks (default 1 000). Totals in the header cover every fetched row; `limit` (default 100),
+  `order_by` and `min_impressions` / `min_clicks` only cut what is shown. When the header says
+  row_limit was reached, call again with the suggested `start_row`. Long-tail rows with 0 clicks may
+  sit beyond what the API ever returns.
 
 ## Filters
 
@@ -78,7 +80,8 @@ Key on the landing page.
 ## Recipes
 
 **Keyword cannibalization** — several URLs competing for one query.
-`dimensions: ["query", "page"]`, `row_limit: 25000`, last 28-90 days. Group rows by query; flag
+`dimensions: ["query", "page"]`, `row_limit: 25000`, `min_impressions: 50`, `order_by: "query"`,
+a large `limit`, last 28-90 days. Group rows by query; flag
 queries where 2+ pages each get a meaningful share of impressions (e.g. ≥ 20%) and positions are
 close. Check with `inspect_url` which page Google treats as canonical.
 
@@ -108,7 +111,9 @@ canonical" is the most common silent reason a page gets no traffic.
 
 ## Response shape
 
-Responses are tab-separated tables with a header that repeats the property, the date range (Pacific
-Time), aggregation and data state. Long results are split into pages by response size — the header
-says which page of how many; pass `page: N` for the next slice. `page` paginates the rows already
-fetched; `start_row` fetches the next batch from the API.
+Responses are tab-separated tables. The `#` header names the property, the date range (Pacific
+Time) and any non-default type, data state or aggregation; a second `#` line holds values shared by
+every row (e.g. `page=` when filtered to one page); `# totals (all N fetched)` sums clicks and
+impressions over every fetched row. Columns: the dimensions, `clicks`, `impressions`, `ctr_pct`,
+`position` (1 decimal). Long results are split into pages by response size; pass `page: N` for the
+next slice. `page` paginates the rows already fetched; `start_row` fetches the next batch from the API.

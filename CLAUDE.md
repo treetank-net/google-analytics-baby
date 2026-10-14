@@ -38,7 +38,7 @@ Lekki klient REST w `search-console.ts`: `fetch` + access token z tego samego `O
 bez pakietu `googleapis`. Endpointy: `webmasters/v3` (sites, sitemaps, searchAnalytics.query) i
 `searchconsole/v1` (URL Inspection). Błędy HTTP klasyfikowane w `classifyGoogleApiError` →
 `GoogleApiError.problem` (`insufficient_scope`, `api_disabled`, `site_permission`, `auth_revoked`, `quota`, `other`),
-czytelne komunikaty w `errors.ts`. Toole GSC zwracają TSV (z paginacją po rozmiarze odpowiedzi), toole GA4 — JSON.
+czytelne komunikaty w `errors.ts`. Wszystkie toole (GA4 i GSC) zwracają TSV przez `tools/table.ts` — patrz „Format odpowiedzi”.
 Ahrefs/Clarity NIE trafiają tutaj — osobny plugin `seo-baby`, który korzysta z GSC przez ten plugin.
 
 ### API — GA4 Data + Admin
@@ -73,19 +73,43 @@ search-console.ts   — klient REST GSC, budowanie requestów, walidacja, daty w
 tools/
   auth.ts                  — registerAuthTools(): setup_google_auth, update_plugin
   compact-listing.ts       — compactToolListing(): wycina z tools/list klucze tylko-walidacyjne
-  read.ts                  — registerReadTools(): toole read GA4 (JSON)
+  read.ts                  — registerReadTools(): toole read GA4
+  ga-format.ts             — GA4: nazwy kolumn, plan requestu (orderBys/limit/metricFilter/TOTAL), wiersze, config
   search-console.ts        — registerSearchConsoleTools(): list_search_console_sites, run_search_analytics, inspect_url, list_sitemaps
-  search-console-format.ts — wiersze/nagłówki TSV dla GSC
-  format.ts                — wspólne TSV: flattenRow, toTsv, paginate, pageNote, tsvDocument
+  search-console-format.ts — wiersze i scope/notki nagłówka dla GSC
+  table.ts                 — wspólny format: shapeRows, layoutFor, tableDocument, sectionsDocument, shapeSchemas
 ```
 
 Testy: `server/test/smoke.ts` (`npm test`) — czyste funkcje: klasyfikacja błędów, body requestów, walidacja,
-daty, TSV/paginacja, budżet `tools/list`. Skille: `skills/gsc/SKILL.md` (pułapki GSC) i
+daty, kształtowanie tabel na realistycznych odpowiedziach GA4/GSC (metryki jako stringi), budżet `tools/list`. Skille: `skills/gsc/SKILL.md` (pułapki GSC) i
 `skills/google-analytics-manual/SKILL.md` (manual tooli) — oba pobiera też `update_plugin`.
 
+### Format odpowiedzi — serwer kształtuje, agent nie dostaje zrzutu
+Kontrakt: `marketing-context-mcp/docs/response-format-contract.md`. Każda odpowiedź listowa idzie przez
+`tableDocument()` (`tools/table.ts`): nagłówek `# tytuł · scope · currency=… · showing top N of M by -x`,
+linia `# k=v` ze stałymi kolumnami, `# totals (all M): …`, potem TSV. Puste kolumny znikają. Kolumny to
+snake_case nazw API GA4 (`reportColumnName` w `ga-format.ts`) z aliasami rodziny (`source_medium`,
+`campaign`, `channel_group`, `views`, `cost`/`clicks`/`impressions`/`cpc`/`roas` dla metryk advertiser*).
+Wartości: metryki GA4 przychodzą jako stringi → liczby; ułamki (`*Rate`, `dauPerMau` itp.) → `*_pct`;
+`TYPE_CURRENCY` → 2 miejsca; reszta 2 miejsca gdy ≥ 1, inaczej 3 cyfry znaczące; `date` → ISO.
+Wspólne parametry o nazwach z kontraktu: `fields`, `order_by` (`-` = malejąco), `limit`, `summary`,
+`min_cost`/`min_clicks`/`min_impressions` (tylko gdzie kolumna istnieje), `page`, `page_chars` (domyślnie 12k).
+
+GA4 (`planReport`): `order_by` i `limit` idą do API (`orderBys`, `limit`, domyślnie 100, channel 50) — nigdy
+więcej nie wysyłamy requestu bez limitu (domyślne 10 000 wierszy API). `rowCount` daje „of M”. Totals:
+`metricAggregations: TOTAL` z API, w nagłówku TYLKO metryki addytywne (`SUMMABLE_COLUMNS`) — nigdy users
+ani rate'y. `min_*` idzie jako `metricFilter`; wtedy (nie wiemy, czy TOTAL respektuje metricFilter) pobieramy
+do 10 000 wierszy, sumujemy lokalnie i deklarujemy `capped at` gdy pasuje więcej. `summary` = API `limit: 1`.
+Metadata: tylko `currencyCode` do nagłówka + notki `thresholded`/`sampled`/`(other) row`.
+GSC: `row_limit` (domyślnie 1000) to wielkość pobrania z API, totals = suma pobranych wierszy, `limit`/
+`order_by`/`min_*` tną lokalnie (API GSC nie sortuje inaczej niż po klikach). Toole konfiguracyjne
+(`get_property_details`, `get_custom_dimensions_and_metrics`, `inspect_url`) → `sectionsDocument`: linie `#` +
+sekcje TSV, bez `{seconds,nanos}`, nulli, domyślnych enumów i surowych obiektów linków Ads (zostają customer id).
+
 ### Opisy toolów — jedno zdanie, manual w skillu
-`tools/list` model płaci w każdej sesji, zanim cokolwiek zrobi (spadł z 12 831 do ~6 000 znaków,
-instrukcje z 1 481 do ~970). Opis toola to jedno zdanie: co zwraca i kiedy go użyć (budżet 200 znaków).
+`tools/list` model płaci w każdej sesji, zanim cokolwiek zrobi (spadł z 12 831 do ~7 100 znaków razem z
+parametrami kształtowania; instrukcje ~1 300). Semantyka wspólnych parametrów (`fields`, `order_by`, `limit`,
+`summary`, `min_*`, `page*`) jest raz w instrukcjach, nie w każdym schemacie. Opis toola to jedno zdanie: co zwraca i kiedy go użyć (budżet 200 znaków).
 Opis parametru tylko wtedy, gdy nazwa i schemat nie mówią wszystkiego (budżet 100 znaków): bez opisów
 `property_id`, `site_url`, dat, `page`, `page_chars`, `limit`. Wspólne pojęcia są raz w
 `instructions.ts`, szczegóły i limity w `skills/google-analytics-manual/SKILL.md`, pułapki GSC w
@@ -113,8 +137,8 @@ W przeciwieństwie do ads NIE ma developer tokena ani MCC approval.
 ## Jak dodawać nowe toole
 
 **Nowy read tool GA4:**
-1. Handler `server.tool('...')` → `tools/read.ts`.
-2. Funkcja klienta (Data/Admin API) → `client.ts`, sygnatura `(cfg: GaConfig, property, ...params) => Promise<unknown>`.
+1. Handler `server.tool('...')` → `tools/read.ts`, odpowiedź przez `tableDocument`/`reportDocument`/`sectionsDocument`.
+2. Funkcja klienta (Data/Admin API) → `client.ts`, zwraca surową odpowiedź; kształtowanie → `tools/ga-format.ts`.
 3. Walidacja wejścia przez zod w handlerze.
 4. Opis: jedno zdanie (≤200 znaków), szczegóły do `skills/google-analytics-manual/SKILL.md`.
 5. `npm run build` po każdej zmianie w `src/`.
@@ -122,7 +146,7 @@ W przeciwieństwie do ads NIE ma developer tokena ani MCC approval.
 **Nowy tool Search Console:**
 1. Handler → `tools/search-console.ts`, owinięty w `handleSearchConsole` (auth check + `formatError`).
 2. Request jako czysta funkcja `...Request()` w `search-console.ts` (testowalna bez sieci) + funkcja `(cfg, siteUrl, ...)` wołająca `gsc()`.
-3. Formatowanie wyniku → `tools/search-console-format.ts`, render przez `tsvDocument` + `paginate` z `tools/format.ts`.
+3. Wiersze → `tools/search-console-format.ts` (kolumny snake_case, `Row`), render przez `tableDocument` z `tools/table.ts`.
 4. Test w `server/test/smoke.ts`, potem `npm test && npm run build`. Wiedza domenowa dla agenta → `skills/gsc/SKILL.md`, opis toola → manual.
 
 **Konwencje (rodzina):**

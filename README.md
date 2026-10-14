@@ -23,8 +23,8 @@ not spend budget, so the family's two-phase mutation safety has nothing to prote
 ## Tools
 
 - `list_analytics_properties` — map account ↔ property ↔ linked Google Ads accounts. Start here.
-- `get_property_details` — config for one property (time zone, currency, data streams, Ads links).
-- `run_report` — generic GA4 Data API report (dimensions, metrics, date range, filter).
+- `get_property_details` — config for one property (time zone, currency, data streams, Ads customer ids).
+- `run_report` — generic GA4 Data API report (dimensions, metrics, date range, filter), top 100 rows by default.
 - `run_realtime_report` — last 30 minutes of activity.
 - `get_custom_dimensions_and_metrics` — custom fields defined on a property.
 - `get_channel_performance` — closed-loop ROAS per source/medium/campaign.
@@ -35,6 +35,12 @@ Search Console:
 - `run_search_analytics` — clicks, impressions, CTR, position by query/page/country/device/date.
 - `inspect_url` — URL Inspection: index status, canonical, robots, last crawl, rich results.
 - `list_sitemaps` — submitted sitemaps with errors and URL counts.
+
+Responses are compact tab-separated tables shaped on the server: short snake_case columns, rates as
+`*_pct`, money with 2 decimals in the property currency, constant columns and totals over all matching
+rows in `#` header lines. Every table tool takes `fields`, `order_by` (`-sessions` = descending),
+`limit`, `summary`, `page` and `page_chars`; `min_cost` / `min_clicks` / `min_impressions` where the
+column exists. GA4 reports push the order and limit down to the API.
 
 Tool descriptions are one line each to keep the tool manifest small. The `google-analytics-manual`
 skill documents every tool in detail; the `gsc` skill covers Search Console pitfalls (data lag,

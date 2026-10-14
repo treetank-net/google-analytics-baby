@@ -22,7 +22,7 @@ export interface PropertySummary {
   displayName: string;
   account: string;
   accountDisplayName: string;
-  googleAdsLinks: unknown[];
+  googleAdsLinks: any[];
 }
 
 export interface ReportRequest {
@@ -30,17 +30,22 @@ export interface ReportRequest {
   metrics: string[];
   startDate: string;
   endDate: string;
-  limit?: number;
+  limit: number;
   dimensionFilter?: string;
+  orderBys?: unknown[];
+  metricFilter?: unknown;
+  metricAggregations?: string[];
 }
+
+export type RealtimeRequest = Omit<ReportRequest, 'startDate' | 'endDate' | 'dimensionFilter'>;
 
 function normalizePropertyName(property: string): string {
   const trimmed = property.trim();
   return trimmed.startsWith('properties/') ? trimmed : `properties/${trimmed}`;
 }
 
-function normalizeLimit(limit: number | undefined): string | undefined {
-  return limit ? String(Math.min(limit, 100000)) : undefined;
+function normalizeLimit(limit: number): string {
+  return String(Math.max(1, Math.min(Math.floor(limit), 100000)));
 }
 
 function buildFieldList(names: string[]): { name: string }[] {
@@ -51,7 +56,7 @@ function buildDateRange(startDate: string, endDate: string) {
   return [{ startDate, endDate }];
 }
 
-function buildDimensionFilter(expression: string | undefined): unknown | undefined {
+export function buildDimensionFilter(expression: string | undefined): unknown | undefined {
   if (!expression) return undefined;
   const match = expression.match(/^\s*([A-Za-z0-9_]+)\s*(==|=|contains|CONTAINS)\s*"([^"]+)"\s*$/);
   if (!match) {
@@ -71,34 +76,7 @@ function buildDimensionFilter(expression: string | undefined): unknown | undefin
   };
 }
 
-function getResponseRows(response: any) {
-  const dimensionHeaders = response.dimensionHeaders || [];
-  const metricHeaders = response.metricHeaders || [];
-  return (response.rows || []).map((row: any) => {
-    const dimensions = Object.fromEntries(
-      dimensionHeaders.map((header: any, i: number) => [header.name, row.dimensionValues?.[i]?.value || '']),
-    );
-    const metrics = Object.fromEntries(
-      metricHeaders.map((header: any, i: number) => [header.name, row.metricValues?.[i]?.value || '']),
-    );
-    return { dimensions, metrics };
-  });
-}
-
-function formatReportResponse(response: any) {
-  return {
-    rowCount: response.rowCount || 0,
-    dimensionHeaders: (response.dimensionHeaders || []).map((h: any) => h.name),
-    metricHeaders: (response.metricHeaders || []).map((h: any) => h.name),
-    rows: getResponseRows(response),
-    totals: getResponseRows({ ...response, rows: response.totals || [] }),
-    maximums: getResponseRows({ ...response, rows: response.maximums || [] }),
-    minimums: getResponseRows({ ...response, rows: response.minimums || [] }),
-    metadata: response.metadata || undefined,
-  };
-}
-
-async function safeListGoogleAdsLinks(cfg: GaConfig, property: string): Promise<unknown[]> {
+async function safeListGoogleAdsLinks(cfg: GaConfig, property: string): Promise<any[]> {
   try {
     return await listGoogleAdsLinks(cfg, property);
   } catch {
@@ -130,7 +108,7 @@ export async function listPropertySummaries(cfg: GaConfig, accountFilter?: strin
   })));
 }
 
-export async function getPropertyDetails(cfg: GaConfig, property: string): Promise<unknown> {
+export async function getPropertyDetails(cfg: GaConfig, property: string): Promise<{ property: any; dataStreams: any[]; googleAdsLinks: any[] }> {
   const admin = getAdminClient(cfg);
   const name = normalizePropertyName(property);
   const [[details], [dataStreams], googleAdsLinks] = await Promise.all([
@@ -145,41 +123,48 @@ export async function getPropertyDetails(cfg: GaConfig, property: string): Promi
   };
 }
 
-export async function listGoogleAdsLinks(cfg: GaConfig, property: string): Promise<unknown[]> {
+export async function listGoogleAdsLinks(cfg: GaConfig, property: string): Promise<any[]> {
   const admin = getAdminClient(cfg);
   const [links] = await admin.listGoogleAdsLinks({ parent: normalizePropertyName(property) });
   return links;
 }
 
-export async function runReport(cfg: GaConfig, property: string, request: ReportRequest): Promise<unknown> {
-  const data = getDataClient(cfg);
-  const [response] = await data.runReport({
+export function buildReportRequest(property: string, request: ReportRequest): Record<string, unknown> {
+  const body: Record<string, unknown> = {
     property: normalizePropertyName(property),
     dimensions: buildFieldList(request.dimensions),
     metrics: buildFieldList(request.metrics),
     dateRanges: buildDateRange(request.startDate, request.endDate),
     limit: normalizeLimit(request.limit),
-    dimensionFilter: buildDimensionFilter(request.dimensionFilter) as any,
-  });
-  return formatReportResponse(response);
+  };
+  const dimensionFilter = buildDimensionFilter(request.dimensionFilter);
+  if (dimensionFilter) body.dimensionFilter = dimensionFilter;
+  if (request.metricFilter) body.metricFilter = request.metricFilter;
+  if (request.orderBys?.length) body.orderBys = request.orderBys;
+  if (request.metricAggregations?.length) body.metricAggregations = request.metricAggregations;
+  return body;
 }
 
-export async function runRealtimeReport(
-  cfg: GaConfig,
-  property: string,
-  request: Pick<ReportRequest, 'dimensions' | 'metrics' | 'limit'>,
-): Promise<unknown> {
-  const data = getDataClient(cfg);
-  const [response] = await data.runRealtimeReport({
+export async function runReport(cfg: GaConfig, property: string, request: ReportRequest): Promise<any> {
+  const [response] = await getDataClient(cfg).runReport(buildReportRequest(property, request) as any);
+  return response;
+}
+
+export async function runRealtimeReport(cfg: GaConfig, property: string, request: RealtimeRequest): Promise<any> {
+  const body: Record<string, unknown> = {
     property: normalizePropertyName(property),
     dimensions: buildFieldList(request.dimensions),
     metrics: buildFieldList(request.metrics),
     limit: normalizeLimit(request.limit),
-  });
-  return formatReportResponse(response);
+  };
+  if (request.metricFilter) body.metricFilter = request.metricFilter;
+  if (request.orderBys?.length) body.orderBys = request.orderBys;
+  if (request.metricAggregations?.length) body.metricAggregations = request.metricAggregations;
+  const [response] = await getDataClient(cfg).runRealtimeReport(body as any);
+  return response;
 }
 
-export async function getCustomDimensionsAndMetrics(cfg: GaConfig, property: string): Promise<unknown> {
+export async function getCustomDimensionsAndMetrics(cfg: GaConfig, property: string): Promise<{ customDimensions: any[]; customMetrics: any[] }> {
   const admin = getAdminClient(cfg);
   const parent = normalizePropertyName(property);
   const [[customDimensions], [customMetrics]] = await Promise.all([
@@ -189,24 +174,17 @@ export async function getCustomDimensionsAndMetrics(cfg: GaConfig, property: str
   return { customDimensions, customMetrics };
 }
 
-export async function getChannelPerformance(cfg: GaConfig, property: string, days: number): Promise<unknown> {
-  return runReport(cfg, property, {
-    dimensions: ['sessionSourceMedium', 'sessionCampaignName', 'sessionDefaultChannelGroup'],
-    metrics: [
-      'sessions',
-      'engagedSessions',
-      'conversions',
-      'totalRevenue',
-      'advertiserAdCost',
-      'advertiserAdClicks',
-      'advertiserAdCostPerClick',
-      'returnOnAdSpend',
-    ],
-    startDate: `${days}daysAgo`,
-    endDate: 'today',
-    limit: 1000,
-  });
-}
+export const CHANNEL_DIMENSIONS = ['sessionSourceMedium', 'sessionCampaignName', 'sessionDefaultChannelGroup'];
+export const CHANNEL_METRICS = [
+  'sessions',
+  'engagedSessions',
+  'keyEvents',
+  'totalRevenue',
+  'advertiserAdCost',
+  'advertiserAdClicks',
+  'advertiserAdCostPerClick',
+  'returnOnAdSpend',
+];
 
 export interface WebStreamSummary {
   property: string;

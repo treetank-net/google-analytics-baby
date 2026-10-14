@@ -22,15 +22,18 @@ import {
   todayInSearchConsoleTimeZone,
   type SearchAnalyticsRequest,
 } from '../search-console.js';
-import { pageCharsSchema, pageNote, pageSchema, paginate, tsvDocument } from './format.js';
+import { pagingSchemas, sectionsDocument, shapeSchemas, tableDocument, tableError, thresholdSchemas } from './table.js';
 import {
   inspectionHeader,
   inspectionSections,
-  searchAnalyticsHeader,
+  searchAnalyticsDefaultOrder,
   searchAnalyticsRows,
+  searchAnalyticsView,
   siteRows,
   sitemapRows,
 } from './search-console-format.js';
+
+const SEARCH_ANALYTICS_DEFAULT_LIMIT = 100;
 
 type TextResult = { content: Array<{ type: 'text'; text: string }> };
 
@@ -43,7 +46,7 @@ async function handleSearchConsole(cfg: GaConfig, fn: () => Promise<string>): Pr
   try {
     return text(await fn());
   } catch (err) {
-    return text(formatError(err));
+    return text(tableError(err) ?? formatError(err));
   }
 }
 
@@ -86,24 +89,19 @@ export function registerSearchConsoleTools(server: McpServer, cfg: GaConfig) {
     {
       match_ga4_properties: z.boolean().default(false)
         .describe('Add GA4 properties whose web stream host matches (a hint; slower on many properties)'),
-      page: pageSchema,
-      page_chars: pageCharsSchema,
+      ...pagingSchemas,
     },
     async ({ match_ga4_properties, page, page_chars }) => handleSearchConsole(cfg, async () => {
       const [sites, ga4] = await Promise.all([
         listSearchConsoleSites(cfg),
         match_ga4_properties ? safeListWebStreams(cfg) : Promise.resolve({} as { streams?: WebStreamSummary[]; note?: string }),
       ]);
-      const rows = siteRows(sites, ga4.streams);
-      const slice = paginate(rows, page ?? 1, page_chars);
-      const note = pageNote(slice, 'sites');
-      const header = [
-        '# Search Console properties',
-        'permission: siteOwner / siteFullUser / siteRestrictedUser can read data; siteUnverifiedUser cannot.',
-        ...(ga4.note ? [ga4.note] : []),
-        ...(note ? [note] : []),
-      ];
-      return tsvDocument([['sites', slice.rows]], header);
+      return tableDocument({
+        title: 'Search Console properties',
+        rows: siteRows(sites, ga4.streams),
+        shape: { page, page_chars },
+        notes: ga4.note ? [ga4.note] : [],
+      });
     }),
   );
 
@@ -126,8 +124,9 @@ export function registerSearchConsoleTools(server: McpServer, cfg: GaConfig) {
       row_limit: z.number().int().min(1).max(GSC_MAX_ROW_LIMIT).default(GSC_DEFAULT_ROW_LIMIT)
         .describe('Rows fetched from the API, sorted by clicks'),
       start_row: z.number().int().min(0).default(0).describe('API offset for the next batch'),
-      page: pageSchema,
-      page_chars: pageCharsSchema,
+      ...shapeSchemas(),
+      min_impressions: thresholdSchemas.min_impressions,
+      min_clicks: thresholdSchemas.min_clicks,
     },
     async (input) => handleSearchConsole(cfg, async () => {
       const siteUrl = normalizeSiteUrl(input.site_url);
@@ -140,18 +139,23 @@ export function registerSearchConsoleTools(server: McpServer, cfg: GaConfig) {
         type: input.type,
         dataState: input.data_state,
         aggregationType: input.aggregation_type,
-        rowLimit: input.row_limit,
+        rowLimit: Math.min(GSC_MAX_ROW_LIMIT, Math.max(input.row_limit, input.limit ?? 0)),
         startRow: input.start_row,
       };
       const problems = searchAnalyticsProblems(request);
       if (problems.length) throw new Error(`invalid Search Analytics request:\n${problems.map((problem) => `  - ${problem}`).join('\n')}`);
       const response = await querySearchAnalytics(cfg, siteUrl, request);
-      const rows = searchAnalyticsRows(request.dimensions, response);
-      const slice = paginate(rows, input.page ?? 1, input.page_chars);
-      const note = pageNote(slice, 'rows');
-      const header = searchAnalyticsHeader(siteUrl, request, response);
-      if (!rows.length) header.push('No rows. Check the date range (data lags 2-3 days; data_state final hides the freshest days), the type and the filters.');
-      return tsvDocument([['rows', slice.rows]], note ? [...header, note] : header);
+      const view = searchAnalyticsView(siteUrl, request, response);
+      const { fields, order_by, limit, summary, page, page_chars, min_impressions, min_clicks } = input;
+      return tableDocument({
+        title: 'search analytics',
+        scope: view.scope,
+        rows: searchAnalyticsRows(request.dimensions, response),
+        shape: { fields, order_by, limit: limit ?? SEARCH_ANALYTICS_DEFAULT_LIMIT, summary, page, page_chars, min_impressions, min_clicks },
+        defaultOrder: searchAnalyticsDefaultOrder(request.dimensions),
+        totalsLabel: view.totalsLabel,
+        notes: view.notes,
+      });
     }),
   );
 
@@ -166,7 +170,7 @@ export function registerSearchConsoleTools(server: McpServer, cfg: GaConfig) {
     async ({ site_url, url, language_code }) => handleSearchConsole(cfg, async () => {
       const siteUrl = normalizeSiteUrl(site_url);
       const result = await inspectSearchConsoleUrl(cfg, siteUrl, url, language_code);
-      return tsvDocument(inspectionSections(result), inspectionHeader(siteUrl, url, result));
+      return sectionsDocument(inspectionHeader(siteUrl, url, result), inspectionSections(result));
     }),
   );
 
@@ -176,20 +180,16 @@ export function registerSearchConsoleTools(server: McpServer, cfg: GaConfig) {
     {
       site_url: siteUrlSchema,
       sitemap_index: z.string().url().optional().describe('List the children of this sitemap index'),
-      page: pageSchema,
-      page_chars: pageCharsSchema,
+      ...pagingSchemas,
     },
     async ({ site_url, sitemap_index, page, page_chars }) => handleSearchConsole(cfg, async () => {
       const siteUrl = normalizeSiteUrl(site_url);
-      const rows = sitemapRows(await listSearchConsoleSitemaps(cfg, siteUrl, sitemap_index));
-      const slice = paginate(rows, page ?? 1, page_chars);
-      const note = pageNote(slice, 'sitemaps');
-      const header = [
-        `# Sitemaps for ${siteUrl}${sitemap_index ? ` (index ${sitemap_index})` : ''}`,
-        'submitted_urls = URLs listed per content type. Google no longer reports indexed counts here — use inspect_url or the Page indexing report.',
-        ...(note ? [note] : []),
-      ];
-      return tsvDocument([['sitemaps', slice.rows]], header);
+      return tableDocument({
+        title: 'sitemaps',
+        scope: [siteUrl, ...(sitemap_index ? [`index ${sitemap_index}`] : [])],
+        rows: sitemapRows(await listSearchConsoleSitemaps(cfg, siteUrl, sitemap_index)),
+        shape: { page, page_chars },
+      });
     }),
   );
 }

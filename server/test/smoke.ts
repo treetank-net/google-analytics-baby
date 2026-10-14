@@ -12,10 +12,32 @@ import {
   type SearchAnalyticsRequest,
 } from '../src/search-console.js';
 import { formatError } from '../src/errors.js';
-import { flattenRow, paginate, pageNote, toTsv, trimPrecision, tsvDocument } from '../src/tools/format.js';
 import {
-  searchAnalyticsHeader,
+  DEFAULT_TABLE_PAGE_CHARS,
+  ShapeError,
+  layoutFor,
+  sectionsDocument,
+  shapeRows,
+  snakeCase,
+  tableDocument,
+  type Row,
+} from '../src/tools/table.js';
+import {
+  customDimensionRows,
+  customMetricRows,
+  planReport,
+  propertyDetailsDocument,
+  propertyRows,
+  reportColumns,
+  reportDocument,
+} from '../src/tools/ga-format.js';
+import { CHANNEL_DIMENSIONS, CHANNEL_METRICS, buildReportRequest } from '../src/client.js';
+import { windowLabel } from '../src/tools/read.js';
+import {
+  inspectionSections,
+  searchAnalyticsDefaultOrder,
   searchAnalyticsRows,
+  searchAnalyticsView,
   siteMatchesStream,
   siteRows,
   sitemapRows,
@@ -208,41 +230,216 @@ function testDates() {
   assert('bad date_range rejected', throws(() => resolveSearchAnalyticsDates({ date_range: 'thisMonth' }, '2026-10-14')));
 }
 
-function testFormat() {
-  console.log('\n--- TSV format ---');
-  assert('flattenRow nests with dots', JSON.stringify(flattenRow({ a: { b: 1 }, c: [1, 2] })) === '{"a.b":1,"c":"1 ~ 2"}');
-  assert('flattenRow object arrays as JSON', flattenRow({ x: [{ y: 1 }] }).x === '[{"y":1}]');
-  assert('trimPrecision', trimPrecision(0.123456789) === 0.123457 && trimPrecision(5) === 5);
+function gaValue(value: string) {
+  return { value, oneValue: 'value' };
+}
 
-  const tsv = toTsv([{ a: 1, b: 'x\ty' }, { a: 2, c: null }]);
-  assert('columns are union in first-seen order', tsv.split('\n')[0] === 'a\tb\tc', tsv);
-  assert('tabs in cells replaced', tsv.split('\n')[1] === '1\tx y\t');
-  assert('null renders empty', tsv.split('\n')[2] === '2\t\t');
-  assert('empty rows → empty string', toTsv([]) === '');
+function gaReportResponse(): any {
+  const rows: Array<[string, string, string[]]> = [
+    ['google / cpc', '20261001', ['1520', '1210', '0.6123456', '4520.5', '187.3333', '1234.567', '812']],
+    ['google / organic', '20261001', ['3410', '2988', '0.7012', '9120', '201.5', '0', '0']],
+    ['(direct) / (none)', '20261001', ['980', '911', '0.55', '1500.123', '95.01', '0', '0']],
+  ];
+  return {
+    dimensionHeaders: [{ name: 'sessionSourceMedium' }, { name: 'date' }],
+    metricHeaders: [
+      { name: 'sessions', type: 'TYPE_INTEGER' },
+      { name: 'totalUsers', type: 'TYPE_INTEGER' },
+      { name: 'engagementRate', type: 'TYPE_FLOAT' },
+      { name: 'purchaseRevenue', type: 'TYPE_CURRENCY' },
+      { name: 'averageSessionDuration', type: 'TYPE_SECONDS' },
+      { name: 'advertiserAdCost', type: 'TYPE_CURRENCY' },
+      { name: 'advertiserAdClicks', type: 'TYPE_INTEGER' },
+    ],
+    rows: rows.map(([source, date, metrics]) => ({
+      dimensionValues: [gaValue(source), gaValue(date)],
+      metricValues: metrics.map(gaValue),
+    })),
+    totals: [{
+      dimensionValues: [gaValue('RESERVED_TOTAL'), gaValue('RESERVED_TOTAL')],
+      metricValues: ['18230', '15011', '0.64', '51234.987', '180.2', '9876.5432', '6021'].map(gaValue),
+    }],
+    maximums: [],
+    minimums: [],
+    rowCount: 812,
+    metadata: {
+      dataLossFromOtherRow: false,
+      schemaRestrictionResponse: null,
+      currencyCode: 'PLN',
+      timeZone: 'Europe/Warsaw',
+      emptyReason: '',
+      subjectToThresholding: false,
+      samplingMetadatas: [],
+    },
+    propertyQuota: null,
+    kind: 'analyticsData#runReport',
+  };
+}
 
-  const doc = tsvDocument([['rows', []]], ['# head']);
-  assert('tsvDocument header + empty section', doc.startsWith('# head\n\n## rows (0)'));
+const REPORT_DIMENSIONS = ['sessionSourceMedium', 'date'];
+const REPORT_METRICS = ['sessions', 'totalUsers', 'engagementRate', 'purchaseRevenue', 'averageSessionDuration', 'advertiserAdCost', 'advertiserAdClicks'];
 
-  const rows = Array.from({ length: 500 }, (_, i) => ({ query: `query number ${i} with some padding`, clicks: i }));
-  const first = paginate(rows, 1, 4000);
-  assert('paginate splits by size', first.pages > 1 && first.rows.length < 500);
-  assert('paginate page fits budget', toTsv(first.rows).length <= 4000, String(toTsv(first.rows).length));
-  const last = paginate(rows, 999, 4000);
-  assert('paginate clamps to last page', last.page === last.pages && last.to === 500);
-  assert('pageNote points to next page', pageNote(first, 'rows')?.includes('page: 2') === true);
-  assert('pageNote silent for one page', pageNote(paginate(rows.slice(0, 2), 1), 'rows') === undefined);
+function testTable() {
+  console.log('\n--- Table shaping ---');
+  assert('snakeCase', snakeCase('sessionSourceMedium') === 'session_source_medium' && snakeCase('customEvent:plan_type') === 'custom_event_plan_type');
+
+  const rows: Row[] = [
+    { campaign: 'A', cost: 10, clicks: 5, note: '' },
+    { campaign: 'B', cost: 30, clicks: 1, note: '' },
+    { campaign: 'C', cost: 20, clicks: 0, note: '' },
+  ];
+  const shaped = shapeRows(rows, { order_by: '-cost', limit: 2, min_clicks: 1 });
+  assert('threshold then order then limit', shaped.rows.map((r) => r.campaign).join() === 'B,A' && shaped.matched === 2, JSON.stringify(shaped.rows));
+  assert('totals cover all matching rows, before limit', shaped.totals.cost === 40 && shaped.totals.clicks === 6);
+  assert('fields project and order columns', JSON.stringify(shapeRows(rows, { fields: ['cost', 'campaign'] }).columns) === '["cost","campaign"]');
+  assert('unknown column is a ShapeError listing columns', (() => {
+    try { shapeRows(rows, { order_by: 'spend' }); return false; } catch (err) { return err instanceof ShapeError && err.message.includes('campaign'); }
+  })());
+
+  const layout = layoutFor([{ a: 1, b: 'x', c: '' }, { a: 2, b: 'x', c: '' }], ['a', 'b', 'c']);
+  assert('empty columns dropped, constant columns hoisted', JSON.stringify(layout.columns) === '["a"]' && layout.constants.b === 'x');
+
+  const doc = tableDocument({ title: 'things', rows, shape: { order_by: '-cost', limit: 1 } });
+  const lines = doc.split('\n');
+  assert('header declares truncation', lines[0] === '# things · showing top 1 of 3 by -cost', lines[0]);
+  assert('totals line labelled with all matching rows', lines[1] === '# totals (all 3): cost=60 clicks=6', lines[1]);
+  assert('summary has no table body', !tableDocument({ title: 't', rows, shape: { summary: true } }).includes('\t'));
+  assert('summary counts all rows', tableDocument({ title: 't', rows, shape: { summary: true } }).startsWith('# t · rows=3'));
+
+  const many: Row[] = Array.from({ length: 2000 }, (_, i) => ({ query: `query number ${i} with some padding`, clicks: 2000 - i }));
+  const page1 = tableDocument({ title: 'q', rows: many });
+  assert('default page fits 12k chars', page1.length <= DEFAULT_TABLE_PAGE_CHARS + 300, String(page1.length));
+  const note = page1.split('\n').pop() || '';
+  assert('page note points to the next page and is short', note.includes('page: 2') && note.length <= 120, note);
+  const small = tableDocument({ title: 'q', rows: many, shape: { page: 2, page_chars: 2000 } });
+  assert('page_chars and page select a slice', small.includes('# page 2/') && small.length < 2600, String(small.length));
+
+  const sections = sectionsDocument(['head'], [['empty', []], ['full', [{ a: 1 }]]]);
+  assert('sections render header, empty and filled sections', sections === '# head\n## empty (0)\n## full (1)\na\n1', sections);
+}
+
+function testReportPlan() {
+  console.log('\n--- GA4 report plan ---');
+  const columns = reportColumns(REPORT_DIMENSIONS, REPORT_METRICS);
+  assert('column names are short snake_case with _pct for fractions',
+    columns.map((c) => c.column).join() === 'source_medium,date,sessions,total_users,engagement_rate_pct,purchase_revenue,average_session_duration,cost,clicks',
+    columns.map((c) => c.column).join());
+
+  const plan = planReport(columns, { order_by: '-sessions' });
+  assert('default limit 100 pushed to the API', plan.fetchLimit === 100 && plan.limit === 100);
+  assert('order_by pushed down as a metric orderBy', JSON.stringify(plan.orderBys) === '[{"metric":{"metricName":"sessions"},"desc":true}]');
+  assert('totals requested from the API', JSON.stringify(plan.metricAggregations) === '["TOTAL"]');
+
+  const byTime = planReport(columns, {});
+  assert('time dimension sorts ascending by default', byTime.order === 'date' && JSON.stringify(byTime.orderBys) === '[{"dimension":{"dimensionName":"date"},"desc":false}]');
+  assert('API names resolve to columns', planReport(columns, { order_by: '-advertiserAdCost' }).shape.order_by === '-cost');
+  assert('summary fetches one row', planReport(columns, { summary: true }).fetchLimit === 1);
+
+  const thresholds = planReport(columns, { min_cost: 5, min_clicks: 2 });
+  const filter = thresholds.metricFilter as any;
+  assert('min_* pushed down as metricFilter on advertiser metrics',
+    filter.andGroup.expressions[0].filter.fieldName === 'advertiserAdCost' && filter.andGroup.expressions[1].filter.numericFilter.value.doubleValue === 2);
+  assert('min_* fetches up to the cap and sums totals locally', thresholds.fetchLimit === 10_000 && thresholds.metricAggregations === undefined);
+  assert('min_cost without a cost metric is rejected', (() => {
+    try { planReport(reportColumns(['date'], ['sessions']), { min_cost: 1 }); return false; } catch (err) { return err instanceof ShapeError; }
+  })());
+
+  const request = buildReportRequest('123', { dimensions: ['date'], metrics: ['sessions'], startDate: '7daysAgo', endDate: 'today', limit: 100, orderBys: plan.orderBys, metricAggregations: ['TOTAL'], dimensionFilter: 'sessionSourceMedium == "google / cpc"' }) as any;
+  assert('request carries explicit limit, orderBys and aggregations', request.limit === '100' && request.property === 'properties/123' && request.orderBys.length === 1 && request.metricAggregations[0] === 'TOTAL');
+  assert('dimension filter translated', request.dimensionFilter.filter.stringFilter.matchType === 'EXACT');
+  assert('no metricFilter key when unused', !('metricFilter' in request));
+  assert('window label', windowLabel('30daysAgo', 'today') === 'last 30d' && windowLabel('2026-09-01', '2026-09-30') === '2026-09-01..2026-09-30');
+}
+
+function testReportDocument() {
+  console.log('\n--- GA4 report document ---');
+  const columns = reportColumns(REPORT_DIMENSIONS, REPORT_METRICS);
+  const plan = planReport(columns, { order_by: '-sessions' });
+  const doc = reportDocument({ title: 'GA4 report', scope: ['property 123', 'last 30d'], columns, plan, response: gaReportResponse() });
+  const lines = doc.split('\n');
+  assert('header: scope, currency, truncation', lines[0] === '# GA4 report · property 123 · last 30d · currency=PLN · showing top 3 of 812 by -sessions', lines[0]);
+  assert('constant date hoisted as ISO', lines[1] === '# date=2026-10-01', lines[1]);
+  assert('totals from the API, summable metrics only', lines[2] === '# totals (all 812): sessions=18230 purchase_revenue=51234.99 cost=9876.54 clicks=6021', lines[2]);
+  assert('columns by name, no repeated keys', lines[3] === 'source_medium\tsessions\ttotal_users\tengagement_rate_pct\tpurchase_revenue\taverage_session_duration\tcost\tclicks', lines[3]);
+  assert('first row sorted by -sessions', lines[4].startsWith('google / organic\t3410\t2988\t70.12\t9120\t201.5\t0\t0'), lines[4]);
+  assert('rates as pct, money 2 decimals, floats rounded', lines[5] === 'google / cpc\t1520\t1210\t61.23\t4520.5\t187.33\t1234.57\t812', lines[5]);
+  assert('no raw API metadata or headers', !/dimensionHeaders|metricHeaders|RESERVED_TOTAL|maximums|kind|oneValue/.test(doc));
+
+  const response = gaReportResponse();
+  response.rowCount = 3;
+  response.totals = [];
+  const thresholdPlan = planReport(columns, { min_cost: 1 });
+  const local = reportDocument({ title: 'GA4 report', scope: [], columns, plan: thresholdPlan, response });
+  assert('threshold path sums totals locally and declares the filter', local.includes('min_cost=1') && local.includes('sessions=5910'), local.split('\n').slice(0, 3).join(' | '));
+
+  response.rowCount = 20_000;
+  const capped = reportDocument({ title: 'GA4 report', scope: [], columns, plan: thresholdPlan, response });
+  assert('fetch cap is declared', capped.includes('capped at 3 of 20000') && capped.includes('totals (first 3 fetched)'), capped.split('\n').slice(0, 4).join(' | '));
+
+  const flagged = gaReportResponse();
+  flagged.metadata.subjectToThresholding = true;
+  flagged.metadata.samplingMetadatas = [{ samplesReadCount: '250000', samplingSpaceSize: '1000000' }];
+  const flaggedDoc = reportDocument({ title: 'r', scope: [], columns, plan, response: flagged });
+  assert('thresholding and sampling surfaced', flaggedDoc.includes('# thresholded') && flaggedDoc.includes('based on 25% of events'));
+
+  const collided = reportColumns(['sessionSourceMedium', 'sourceMedium'], ['sessions']).map((c) => c.column).join();
+  assert('alias yields to the plain name on collision', collided === 'session_source_medium,source_medium,sessions', collided);
+  const channelColumns = reportColumns(CHANNEL_DIMENSIONS, CHANNEL_METRICS);
+  assert('channel columns use family names', channelColumns.map((c) => c.column).join() === 'source_medium,campaign,channel_group,sessions,engaged_sessions,key_events,total_revenue,cost,clicks,cpc,roas');
+}
+
+function testGaConfigFormatting() {
+  console.log('\n--- GA4 configuration formatting ---');
+  const ts = { seconds: '1614556800', nanos: 0 };
+  const [property] = propertyRows([{
+    property: 'properties/123', displayName: 'Shop', account: 'accounts/9', accountDisplayName: 'Acme',
+    googleAdsLinks: [{ name: 'properties/123/googleAdsLinks/1', customerId: '1234567890', canManageClients: false, adsPersonalizationEnabled: { value: true }, createTime: ts, updateTime: ts, creatorEmailAddress: 'a@b.c' }],
+  }]);
+  assert('property row with bare ids and Ads customer ids only', JSON.stringify(property) === '{"property_id":"123","property":"Shop","account_id":"9","account":"Acme","ads_customer_ids":"1234567890"}', JSON.stringify(property));
+
+  const details = propertyDetailsDocument(
+    { name: 'properties/123', propertyType: 'PROPERTY_TYPE_ORDINARY', createTime: ts, updateTime: ts, parent: 'accounts/9', displayName: 'Shop', industryCategory: 'SHOPPING', timeZone: 'Europe/Warsaw', currencyCode: 'PLN', serviceLevel: 'GOOGLE_ANALYTICS_STANDARD', deleteTime: null, expireTime: null, account: 'accounts/9' },
+    [{ name: 'properties/123/dataStreams/55', type: 'WEB_DATA_STREAM', displayName: 'Web', webStreamData: { measurementId: 'G-ABC', firebaseAppId: '', defaultUri: 'https://shop.pl' }, androidAppStreamData: null, iosAppStreamData: null, createTime: ts, updateTime: ts, streamData: 'webStreamData' }],
+    [{ customerId: '1234567890' }, { customerId: '1234567890' }],
+  );
+  const text = sectionsDocument(details.header, [['data streams', details.streams]]);
+  assert('property details compact', text.split('\n')[1] === '# time_zone=Europe/Warsaw currency=PLN industry=SHOPPING service_level=STANDARD created=2021-03-01 ads_customer_ids=1234567890', text.split('\n')[1]);
+  assert('no {seconds,nanos}, nulls or defaults', !/seconds|nanos|null|ORDINARY|streamData|updateTime/.test(text), text);
+  assert('stream row', text.includes('stream_id\ttype\tname\tdefault_uri\tmeasurement_id\tcreated') && text.includes('55\tWEB\tWeb\thttps://shop.pl\tG-ABC\t2021-03-01'), text);
+
+  const dims = customDimensionRows([{ name: 'properties/1/customDimensions/2', parameterName: 'plan', displayName: 'Plan', description: '', scope: 'USER', disallowAdsPersonalization: false }]);
+  assert('custom dimension api name by scope', dims[0].api_name === 'customUser:plan' && !('description' in dims[0] && dims[0].description));
+  const metrics = customMetricRows([{ parameterName: 'score', displayName: 'Score', scope: 'EVENT', measurementUnit: 'STANDARD', restrictedMetricType: [], description: '' }]);
+  assert('custom metric api name, empty restrictions dropped', metrics[0].api_name === 'customEvent:score' && metrics[0].restricted === undefined);
 }
 
 function testSearchConsoleFormat() {
   console.log('\n--- Search Console formatting ---');
-  const response = { rows: [{ keys: ['buty', 'https://example.com/buty'], clicks: 10, impressions: 300, ctr: 0.0333333, position: 4.56789 }] };
-  const [row] = searchAnalyticsRows(['query', 'page'], response);
-  assert('rows keyed by dimension', row.query === 'buty' && row.page === 'https://example.com/buty');
-  assert('ctr/position rounded', row.ctr === 0.0333 && row.position === 4.57);
+  const response = {
+    rows: [
+      { keys: ['buty', 'https://example.com/buty'], clicks: 10, impressions: 300, ctr: 0.0333333, position: 4.56789 },
+      { keys: ['sneakers', 'https://example.com/buty'], clicks: 25, impressions: 1200, ctr: 0.0208333, position: 7.04 },
+      { keys: ['buty damskie', 'https://example.com/buty'], clicks: 0, impressions: 40, ctr: 0, position: 18.2 },
+    ],
+    responseAggregationType: 'byPage',
+  };
+  const rows = searchAnalyticsRows(['query', 'page'], response);
+  assert('rows keyed by dimension', rows[0].query === 'buty' && rows[0].page === 'https://example.com/buty');
+  assert('ctr as pct, position 1 decimal', rows[0].ctr_pct === 3.33 && rows[0].position === 4.6, JSON.stringify(rows[0]));
+  assert('date grouping sorts by date', searchAnalyticsDefaultOrder(['date', 'query']) === 'date' && searchAnalyticsDefaultOrder(['query']) === '-clicks');
 
-  const header = searchAnalyticsHeader('sc-domain:example.com', baseRequest({ rowLimit: 1, startRow: 0 }), response).join('\n');
-  assert('header warns about row_limit reached', header.includes('start_row: 1'));
-  assert('header warns about anonymized queries', header.includes('anonymized'));
+  const request = baseRequest({ dimensions: ['query', 'page'], rowLimit: 3, startRow: 0, filters: [{ dimension: 'country', operator: 'equals', expression: 'pol' }] });
+  const view = searchAnalyticsView('sc-domain:example.com', request, response);
+  assert('row_limit reached points to start_row', view.notes.some((n) => n.includes('start_row: 3')));
+  assert('filters in a header note', view.notes[0] === 'where country equals "pol"');
+  assert('totals label mentions anonymized queries', view.totalsLabel.includes('anonymized'));
+
+  const doc = tableDocument({ title: 'search analytics', scope: view.scope, rows, shape: { limit: 2, min_impressions: 50 }, defaultOrder: '-clicks', totalsLabel: view.totalsLabel, notes: view.notes });
+  const lines = doc.split('\n');
+  assert('GSC header', lines[0] === '# search analytics · sc-domain:example.com · 2026-09-01..2026-09-28 PT · min_impressions=50 · rows=2 · by -clicks', lines[0]);
+  assert('constant page hoisted', lines[1] === '# page=https://example.com/buty', lines[1]);
+  assert('GSC totals summable only', lines[2].startsWith('# totals (all 3 fetched; anonymized queries excluded): clicks=35 impressions=1500'), lines[2]);
+  assert('GSC table', lines.includes('query\tclicks\timpressions\tctr_pct\tposition') && lines.includes('sneakers\t25\t1200\t2.08\t7'), doc);
 
   assert('domain site matches subdomain stream', siteMatchesStream('sc-domain:example.com', 'https://shop.example.com'));
   assert('url prefix matches www-less stream', siteMatchesStream('https://www.example.com/', 'https://example.com'));
@@ -253,15 +450,18 @@ function testSearchConsoleFormat() {
     [{ property: 'properties/1', displayName: 'A', defaultUri: 'https://www.a.com' }],
   );
   assert('sites sorted and kinded', sites[0].site_url === 'https://a.com/' && sites[0].kind === 'url-prefix' && sites[1].kind === 'domain');
-  assert('ga4 match column', sites[0].ga4_properties === 'properties/1 A' && sites[1].ga4_properties === '');
+  assert('ga4 match column with bare property id', sites[0].ga4_properties === '1 A' && sites[1].ga4_properties === undefined);
   assert('no streams → no ga4 column', !('ga4_properties' in siteRows([{ siteUrl: 'sc-domain:b.com' }])[0]));
 
-  const [sitemap] = sitemapRows([{ path: 'https://a.com/sitemap.xml', errors: '2', contents: [{ type: 'web', submitted: '120' }] }]);
-  assert('sitemap counts parsed', sitemap.errors === 2 && sitemap.warnings === 0 && sitemap.submitted_urls === 'web:120');
+  const [sitemap] = sitemapRows([{ path: 'https://a.com/sitemap.xml', errors: '2', lastSubmitted: '2026-10-01T12:34:56.789Z', contents: [{ type: 'web', submitted: '120' }] }]);
+  assert('sitemap counts parsed, timestamps to the second', sitemap.errors === 2 && sitemap.warnings === 0 && sitemap.submitted_urls === 'web:120' && sitemap.last_submitted === '2026-10-01T12:34:56Z', JSON.stringify(sitemap));
+
+  const inspection = inspectionSections({ indexStatusResult: { verdict: 'PASS', coverageState: 'Submitted and indexed', referringUrls: [], googleCanonical: 'https://a.com/x', userCanonical: 'https://a.com/x', lastCrawlTime: '2026-10-01T03:04:05Z' } });
+  assert('inspection drops empty arrays, compares canonicals', !inspection[0][1].some((r) => r.field === 'referring_urls') && inspection[0][1].some((r) => r.field === 'canonical_match' && r.value === 'same'));
 }
 
 const LISTING_BUDGET_CHARS = 15_000;
-const LISTING_PIN_CHARS = 6_500;
+const LISTING_PIN_CHARS = 7_500;
 const INSTRUCTIONS_BUDGET_CHARS = 2_500;
 const TOOL_DESCRIPTION_BUDGET = 200;
 const PARAM_DESCRIPTION_BUDGET = 100;
@@ -315,7 +515,10 @@ async function main() {
   testSearchAnalyticsBody();
   testSearchAnalyticsValidation();
   testDates();
-  testFormat();
+  testTable();
+  testReportPlan();
+  testReportDocument();
+  testGaConfigFormatting();
   testSearchConsoleFormat();
   await testToolListingBudget();
 
