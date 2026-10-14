@@ -1,6 +1,6 @@
 # google-analytics-baby
 
-Claude Code plugin: read-only MCP server for Google Analytics 4 (GA4). Członek rodziny `*-baby`
+Claude Code plugin: read-only MCP server for Google Analytics 4 (GA4) i Google Search Console (GSC). Członek rodziny `*-baby`
 (obok `google-ads-baby` i `meta-ads-baby`).
 
 ## Architektura
@@ -21,12 +21,25 @@ wtedy reużyjemy posture z rodziny.
 ### OAuth — osobny od ads
 Reużywamy WZORZEC z `google-ads-baby` (`config.ts`: loadSavedConfig/saveConfig/configFromEnv;
 `auth.ts`: lokalny serwer OAuth, `/open` landing, `/callback`), ale z różnicami:
-- scope = `https://www.googleapis.com/auth/analytics.readonly` (w ads było `adwords`),
+- scope'y = `analytics.readonly` + `webmasters.readonly` (GSC) — jeden consent na oba (w ads było `adwords`),
 - osobny config dir: `.google-analytics-baby` (env override `GA_BABY_DATA`),
 - env prefix `GOOGLE_ANALYTICS_*` (CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN),
 - brak developer tokena, brak MCC, brak pól safety,
 - osobny refresh token — osobny consent Google, nie współdzieli tokenu z ads,
 - port lokalnego serwera OAuth: 9877 (ads używa 9876 — żeby nie kolidowały).
+
+Refresh tokeny sprzed wersji z GSC mają tylko `analytics.readonly`. GA4 działa dalej, a toole GSC zwracają
+`GoogleApiError` z `problem: 'insufficient_scope'` → komunikat „uruchom ponownie setup_google_auth”.
+Klient OAuth (projekt Cloud) musi mieć włączone Google Search Console API i scope `webmasters.readonly`
+na consent screen — inaczej `api_disabled` z linkiem aktywacyjnym.
+
+### API — Search Console
+Lekki klient REST w `search-console.ts`: `fetch` + access token z tego samego `OAuth2Client` (`getAuthClient`),
+bez pakietu `googleapis`. Endpointy: `webmasters/v3` (sites, sitemaps, searchAnalytics.query) i
+`searchconsole/v1` (URL Inspection). Błędy HTTP klasyfikowane w `classifyGoogleApiError` →
+`GoogleApiError.problem` (`insufficient_scope`, `api_disabled`, `site_permission`, `auth_revoked`, `quota`, `other`),
+czytelne komunikaty w `errors.ts`. Toole GSC zwracają TSV (z paginacją po rozmiarze odpowiedzi), toole GA4 — JSON.
+Ahrefs/Clarity NIE trafiają tutaj — osobny plugin `seo-baby`, który korzysta z GSC przez ten plugin.
 
 ### API — GA4 Data + Admin
 - GA4 Data API: `@google-analytics/data`, `BetaAnalyticsDataClient` (raporty, realtime).
@@ -50,15 +63,22 @@ mechanizmy bez wiedzy domenowej — nigdy modele danych GA4/Ads/Meta.
 ```
 index.ts            — entrypoint: McpServer, instructions, rejestracja tooli, stdio. Owinięte w main()
 config.ts           — GaConfig, getConfigDir() (.google-analytics-baby / GA_BABY_DATA), loadSavedConfig/saveConfig/configFromEnv
-constants.ts        — OAUTH_CLIENT_ID/SECRET (placeholdery — patrz niżej), GA_SCOPES
-errors.ts           — formatError()
+constants.ts        — OAUTH_CLIENT_ID/SECRET, GA_SCOPE, GSC_SCOPE, GA_SCOPES (oba)
+errors.ts           — formatError(), czytelne komunikaty dla GoogleApiError
 auth.ts             — lokalny serwer OAuth (port 9877), /open landing, /start-oauth, /callback
-client.ts           — klienci GA4 (Data+Admin) + funkcje read
+client.ts           — klienci GA4 (Data+Admin) + funkcje read, getAuthClient, listWebStreams (dopasowanie GSC ↔ GA4)
+search-console.ts   — klient REST GSC, budowanie requestów, walidacja, daty w PT, GoogleApiError + klasyfikacja
 
 tools/
-  auth.ts           — registerAuthTools(): setup_google_auth, update_plugin
-  read.ts           — registerReadTools(): wszystkie toole read
+  auth.ts                  — registerAuthTools(): setup_google_auth, update_plugin
+  read.ts                  — registerReadTools(): toole read GA4 (JSON)
+  search-console.ts        — registerSearchConsoleTools(): list_search_console_sites, run_search_analytics, inspect_url, list_sitemaps
+  search-console-format.ts — wiersze/nagłówki TSV dla GSC
+  format.ts                — wspólne TSV: flattenRow, toTsv, paginate, pageNote, tsvDocument
 ```
+
+Testy: `server/test/smoke.ts` (`npm test`) — czyste funkcje: klasyfikacja błędów, body requestów, walidacja,
+daty, TSV/paginacja. Skill: `skills/gsc/SKILL.md` — pobierany też przez `update_plugin`.
 
 #### OAUTH_CLIENT_ID / OAUTH_CLIENT_SECRET
 `constants.ts` celowo nie zawiera wbudowanych OAuth credentials. Użytkownik podaje własne Client
@@ -67,8 +87,8 @@ page podczas `setup_google_auth`; zapisują się wtedy lokalnie w `~/.google-ana
 
 Można reużyć desktop-app credentials z projektu OAuth używanego przez `google-ads-baby` zamiast
 zakładać nową aplikację:
-1. w tym projekcie Cloud Console włącz Analytics Data API + Analytics Admin API,
-2. dodaj scope `analytics.readonly` do OAuth consent screen,
+1. w tym projekcie Cloud Console włącz Analytics Data API + Analytics Admin API + Google Search Console API,
+2. dodaj scope'y `analytics.readonly` i `webmasters.readonly` do OAuth consent screen,
 3. podaj Client ID/Secret przez env albo w `/open` page.
 Refresh token i tak jest osobny (inny scope, inny katalog config `.google-analytics-baby`), więc
 współdzielenie OAuth clienta jest bezpieczne. Osobny projekt Cloud = czystszy rozdział, więcej setupu —
@@ -78,11 +98,17 @@ W przeciwieństwie do ads NIE ma developer tokena ani MCC approval.
 
 ## Jak dodawać nowe toole
 
-**Nowy read tool:**
+**Nowy read tool GA4:**
 1. Handler `server.tool('...')` → `tools/read.ts`.
 2. Funkcja klienta (Data/Admin API) → `client.ts`, sygnatura `(cfg: GaConfig, property, ...params) => Promise<unknown>`.
 3. Walidacja wejścia przez zod w handlerze.
 4. `npm run build` po każdej zmianie w `src/`.
+
+**Nowy tool Search Console:**
+1. Handler → `tools/search-console.ts`, owinięty w `handleSearchConsole` (auth check + `formatError`).
+2. Request jako czysta funkcja `...Request()` w `search-console.ts` (testowalna bez sieci) + funkcja `(cfg, siteUrl, ...)` wołająca `gsc()`.
+3. Formatowanie wyniku → `tools/search-console-format.ts`, render przez `tsvDocument` + `paginate` z `tools/format.ts`.
+4. Test w `server/test/smoke.ts`, potem `npm test && npm run build`. Wiedza domenowa dla agenta → `skills/gsc/SKILL.md`.
 
 **Konwencje (rodzina):**
 - NIE pisz komentarzy w kodzie — nazwy funkcji/zmiennych mają być samodokumentujące.
@@ -90,13 +116,14 @@ W przeciwieństwie do ads NIE ma developer tokena ani MCC approval.
 
 ## Commands
 - `cd server && npm install && npm run build` — zainstaluj zależności, skompiluj TS i zbuduj bundle
+- `cd server && npm test` — smoke testy (tsc do `dist-test/` + node)
 - `cd server && npm run dev` — watch mode (rebuild TS przy zmianach)
 - `cd server && npm start` — uruchom MCP server z bundle.cjs
 
 ## Config
 Env vars (set in plugin.json, sourced from user's environment) OR saved in `config.json` via OAuth flow:
 - `GOOGLE_ANALYTICS_CLIENT_ID` / `GOOGLE_ANALYTICS_CLIENT_SECRET` — OAuth2 app (optional — defaults to built-in app, can be set via /open page)
-- `GOOGLE_ANALYTICS_REFRESH_TOKEN` — user's OAuth2 refresh token (scope analytics.readonly)
+- `GOOGLE_ANALYTICS_REFRESH_TOKEN` — user's OAuth2 refresh token (scopes analytics.readonly + webmasters.readonly)
 - `GA_BABY_DATA` — override config dir (default `~/.google-analytics-baby`)
 
 ## Closed-loop — co GA4 daje za darmo

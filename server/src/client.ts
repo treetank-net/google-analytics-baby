@@ -3,7 +3,7 @@ import { BetaAnalyticsDataClient } from '@google-analytics/data';
 import { AnalyticsAdminServiceClient } from '@google-analytics/admin';
 import type { GaConfig } from './config.js';
 
-function getAuthClient(cfg: GaConfig): OAuth2Client {
+export function getAuthClient(cfg: GaConfig): OAuth2Client {
   const client = new OAuth2Client(cfg.clientId, cfg.clientSecret);
   client.setCredentials({ refresh_token: cfg.refreshToken });
   return client;
@@ -206,4 +206,36 @@ export async function getChannelPerformance(cfg: GaConfig, property: string, day
     endDate: 'today',
     limit: 1000,
   });
+}
+
+export interface WebStreamSummary {
+  property: string;
+  displayName: string;
+  defaultUri: string;
+}
+
+export async function listWebStreams(cfg: GaConfig): Promise<WebStreamSummary[]> {
+  const properties = await listPropertySummariesWithoutLinks(cfg);
+  const admin = getAdminClient(cfg);
+  const perProperty = await Promise.all(properties.map(async ({ property, displayName }) => {
+    try {
+      const [streams] = await admin.listDataStreams({ parent: property });
+      return streams
+        .map((stream: any) => stream.webStreamData?.defaultUri || '')
+        .filter((uri: string) => uri)
+        .map((defaultUri: string) => ({ property, displayName, defaultUri }));
+    } catch {
+      return [];
+    }
+  }));
+  return perProperty.flat();
+}
+
+async function listPropertySummariesWithoutLinks(cfg: GaConfig): Promise<Array<{ property: string; displayName: string }>> {
+  const admin = getAdminClient(cfg);
+  const [accountSummaries] = await admin.listAccountSummaries();
+  return accountSummaries.flatMap((accountSummary: any) => (accountSummary.propertySummaries || []).map((propertySummary: any) => ({
+    property: propertySummary.property || '',
+    displayName: propertySummary.displayName || '',
+  })));
 }

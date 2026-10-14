@@ -2,7 +2,7 @@
   "name": "google-analytics-baby",
   "version": "0.2.1",
   "type": "module",
-  "description": "Google Analytics 4 read-only MCP server.",
+  "description": "Google Analytics 4 + Google Search Console read-only MCP server.",
   "author": "Jacek Marianski <jmarianski@trans.eu>",
   "license": "MIT",
   "repository": {

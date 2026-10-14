@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+- Google Search Console support (read-only, scope `webmasters.readonly`), in the same plugin and OAuth flow as GA4:
+  - `list_search_console_sites` — properties with permission level and kind (Domain vs URL prefix); optional matching to GA4 properties by web stream domain.
+  - `run_search_analytics` — clicks, impressions, CTR and position by query/page/country/device/date/searchAppearance/hour, with AND filters (regex for alternatives), search type, data state, aggregation type and API paging.
+  - `inspect_url` — URL Inspection: index verdict, coverage, robots/noindex, last crawl, Google vs declared canonical, rich results.
+  - `list_sitemaps` — submitted sitemaps with errors, warnings and submitted URL counts.
+- New `gsc` skill: data lag and Pacific Time dates, anonymized queries, byPage vs byProperty, quotas, joining with GA4 on the landing page, and recipes (cannibalization, CTR drops, striking distance, non-indexed pages, traffic drop triage).
+- **Re-consent required for Search Console:** authorizations made before this version cover Analytics only. Search Console tools then say so explicitly; run `setup_google_auth` again. GA4 tools keep working meanwhile.
+- Clear errors for a disabled Search Console API (with the activation link), missing site permission, revoked tokens and quota.
+- `update_plugin` also downloads `skills/gsc/SKILL.md` and creates missing directories.
+
 ## v0.2.1
 - `scripts/start-mcp.js` no longer updates the plugin on every start. Updates happen only through `update_plugin`; the wrapper downloads the bundle exactly once, when there is none on disk. A stale `raw.githubusercontent.com` cache used to let a start-up fetch overwrite a freshly installed newer copy with older files.
 - `update_plugin` compares versions with semver ordering instead of string inequality, so a copy newer than the update server is left untouched with an explicit message instead of being silently downgraded.

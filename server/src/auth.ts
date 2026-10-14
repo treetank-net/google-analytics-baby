@@ -99,8 +99,8 @@ const OPEN_PAGE = `<!DOCTYPE html><html><head><meta charset="utf-8">
   .toggle { color:#2563eb; cursor:pointer; font-size:.9rem; margin-top:.75rem; display:inline-block; }
   .toggle:hover { text-decoration:underline; }
 </style></head><body><div class="card">
-  <h1>Google Analytics — Authorize</h1>
-  <p>Click below to sign in with Google and grant read-only access to your Analytics properties.</p>
+  <h1>Google Analytics &amp; Search Console — Authorize</h1>
+  <p>Click below to sign in with Google and grant read-only access to your Analytics properties and Search Console sites. Keep both permissions ticked on the Google consent screen.</p>
   <span class="toggle" id="toggle-custom">I want to use my own OAuth app credentials</span>
   <div class="custom-fields" id="custom-fields">
     <label>Client ID</label>

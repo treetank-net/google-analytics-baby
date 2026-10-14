@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { readFileSync, renameSync, rmSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs';
+import { dirname, join } from 'path';
 import type { GaConfig } from '../config.js';
 import { startAuthFlow } from '../auth.js';
 import { PLUGIN_VERSION } from '../constants.js';
@@ -23,6 +23,7 @@ async function downloadFile(remotePath: string, localPath: string): Promise<bool
   if (!res.ok) return false;
   const staging = `${localPath}.download`;
   try {
+    mkdirSync(dirname(localPath), { recursive: true });
     writeFileSync(staging, Buffer.from(await res.arrayBuffer()));
     renameSync(staging, localPath);
     return true;
@@ -87,7 +88,7 @@ async function fetchChangelog(fromVer: string, toVer: string): Promise<string> {
 export function registerAuthTools(server: McpServer, cfg: GaConfig) {
   server.tool(
     'setup_google_auth',
-    'Start Google OAuth flow for Google Analytics (read-only). Returns a URL for the user to click. After authorization the refresh token is saved automatically.',
+    'Start Google OAuth flow for Google Analytics and Google Search Console (both read-only). Returns a URL for the user to click. After authorization the refresh token is saved automatically. Run it again when a Search Console tool reports that access was not granted — authorizations made before Search Console support cover Analytics only.',
     {},
     async () => {
       const { shortUrl } = startAuthFlow(cfg);
@@ -95,7 +96,8 @@ export function registerAuthTools(server: McpServer, cfg: GaConfig) {
         content: [{
           type: 'text',
           text: [
-            'Opening a browser for Google Analytics setup.',
+            'Opening a browser for Google Analytics + Search Console setup.',
+            'On the Google consent screen keep both permissions ticked (Analytics and Search Console).',
             'If no browser window appeared, open this URL manually:',
             shortUrl,
             'After authorization in the browser, type anything here.',
@@ -137,6 +139,7 @@ export function registerAuthTools(server: McpServer, cfg: GaConfig) {
           ['package.json', join(root, 'package.json')],
           ['scripts/start-mcp.js', join(root, 'scripts', 'start-mcp.js')],
           ['CHANGELOG.md', join(root, 'CHANGELOG.md')],
+          ['skills/gsc/SKILL.md', join(root, 'skills', 'gsc', 'SKILL.md')],
         ];
         for (const [remote, local] of files) {
           const ok = await downloadFile(remote, local);
